@@ -31,7 +31,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --actor_learning_rate 5e-7 \
    --critic_learning_rate 9e-6 \
    --init_kl_coef 0.01 \
-   --prompt_data /pubshare/zy/cache/prompt-collection-v0.1/data \
+   --prompt_data /home/jovyan/notebook/zhouyang/OpenRLHF/1data1PPO/train.json \
    --input_key prompt \
    --apply_chat_template \
    --normalize_reward \
