@@ -16,12 +16,12 @@ from openrlhf.utils import blending_datasets, get_strategy, get_tokenizer
 
 def train(args):
     # configure strategy
-    strategy = get_strategy(args)
+    strategy = get_strategy(args)  #根据传入的参数 args 获取适当的训练策略DeepspeedStrategy
     strategy.setup_distributed()
 
     # configure model
     # load huggingface model
-    actor = Actor(
+    actor = Actor(  #创建一个 Actor 对象nn.Module)
         args.pretrain,
         use_flash_attention_2=args.flash_attn,
         bf16=args.bf16,
@@ -33,10 +33,10 @@ def train(args):
         ds_config=strategy.get_ds_train_config(is_actor=True),
     )
 
-    if args.actor_init_on_gpu:
+    if args.actor_init_on_gpu:  #扔进GPU
         actor = actor.to(torch.cuda.current_device())
 
-    critic = get_llm_for_sequence_regression(
+    critic = get_llm_for_sequence_regression(  #创建critic
         args.critic_pretrain,
         "critic",
         normalize_reward=args.normalize_reward,
@@ -51,7 +51,7 @@ def train(args):
         value_head_prefix=args.value_head_prefix,
         init_value_head=strategy.args.pretrain == strategy.args.critic_pretrain,
     )
-
+    # 没有reward model用critic替代
     if not args.remote_rm_url:
         reward_model = get_llm_for_sequence_regression(
             args.reward_pretrain,
@@ -63,6 +63,7 @@ def train(args):
             ds_config=strategy.get_ds_train_config(is_actor=False),
             value_head_prefix=args.value_head_prefix,
         )
+        #创建分词器
         get_tokenizer(args.reward_pretrain, reward_model, "left", strategy, use_fast=not args.disable_fast_tokenizer)
     else:
         reward_model = None
