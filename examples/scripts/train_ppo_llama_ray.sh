@@ -15,8 +15,8 @@ ray job submit --address="http://127.0.0.1:8265" \
    --vllm_tensor_parallel_size 2 \
    --colocate_critic_reward \
    --colocate_actor_ref \
-   --pretrain OpenRLHF/Llama-3-8b-sft-mixture \
-   --reward_pretrain OpenRLHF/Llama-3-8b-rm-mixture \
+   --pretrain /pubshare/zy/cache/Llama-3-8b-sft-mixture \
+   --reward_pretrain /pubshare/zy/cache/Llama-3-8b-rm-mixture \
    --save_path /pubshare/zy/cache/checkpoint/llama-3-8b-rlhf \
    --micro_train_batch_size 8 \
    --train_batch_size 128 \
@@ -31,7 +31,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --actor_learning_rate 5e-7 \
    --critic_learning_rate 9e-6 \
    --init_kl_coef 0.01 \
-   --prompt_data OpenRLHF/prompt-collection-v0.1 \
+   --prompt_data /pubshare/zy/cache/prompt-collection-v0.1 \
    --input_key context_messages \
    --apply_chat_template \
    --normalize_reward \
