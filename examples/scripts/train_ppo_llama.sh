@@ -4,7 +4,7 @@ read -r -d '' training_commands <<EOF
 openrlhf.cli.train_ppo \
    --pretrain OpenRLHF/Llama-3-8b-sft-mixture \
    --reward_pretrain OpenRLHF/Llama-3-8b-rm-mixture \
-   --save_path ./checkpoint/llama-3-8b-rlhf \
+   --save_path /pubshare/zy/cache/checkpoint/llama-3-8b-rlhf \
    --save_steps -1 \
    --logging_steps 1 \
    --eval_steps -1 \
