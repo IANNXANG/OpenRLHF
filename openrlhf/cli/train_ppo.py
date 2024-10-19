@@ -63,7 +63,7 @@ def train(args):
             ds_config=strategy.get_ds_train_config(is_actor=False),
             value_head_prefix=args.value_head_prefix,
         )
-        #创建分词器
+        #创建分词器给rm
         get_tokenizer(args.reward_pretrain, reward_model, "left", strategy, use_fast=not args.disable_fast_tokenizer)
     else:
         reward_model = None
@@ -72,9 +72,11 @@ def train(args):
     strategy.print("mean: {}, std {}".format(critic.mean, critic.std))
 
     # configure tokenizer
+    #分词器给a和c
     tokenizer = get_tokenizer(args.pretrain, actor.model, "left", strategy, use_fast=not args.disable_fast_tokenizer)
     get_tokenizer(args.critic_pretrain, critic, "left", strategy, use_fast=not args.disable_fast_tokenizer)
 
+    #打印a和c的事情
     strategy.print(actor)
     strategy.print(critic)
 
