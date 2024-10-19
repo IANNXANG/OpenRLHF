@@ -32,7 +32,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --critic_learning_rate 9e-6 \
    --init_kl_coef 0.01 \
    --prompt_data /pubshare/zy/cache/prompt-collection-v0.1/data \
-   --input_key context_messages \
+   --input_key prompt \
    --apply_chat_template \
    --normalize_reward \
    --adam_offload \
