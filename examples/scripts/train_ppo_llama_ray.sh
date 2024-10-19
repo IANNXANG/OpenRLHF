@@ -1,7 +1,7 @@
 set -x 
 
 ray job submit --address="http://127.0.0.1:8265" \
-   --runtime-env-json='{"working_dir": "/openrlhf"}' \
+   --runtime-env-json='{"working_dir": "/home/jovyan/notebook/zhouyang/OpenRLHF"}' \
    -- python3 -m openrlhf.cli.train_ppo_ray \
    --ref_num_nodes 1 \
    --ref_num_gpus_per_node 2 \
