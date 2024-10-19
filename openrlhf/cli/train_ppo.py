@@ -387,7 +387,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.critic_pretrain is None:
+    if args.critic_pretrain is None:  #检查 --critic_pretrain 参数。如果未提供且没有远程奖励模型 URL，则将其设置为奖励模型路径。
         if not args.remote_rm_url:
             args.critic_pretrain = args.reward_pretrain
         else:
