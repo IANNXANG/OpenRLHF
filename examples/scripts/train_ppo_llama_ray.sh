@@ -6,7 +6,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --ref_num_nodes 1 \
    --ref_num_gpus_per_node 2 \
    --reward_num_nodes 1 \
-   --reward_num_gpus_per_node 2 \
+   --reward_num_gpus_per_node 1 \
    --critic_num_nodes 1 \
    --critic_num_gpus_per_node 2 \
    --actor_num_nodes 1 \
