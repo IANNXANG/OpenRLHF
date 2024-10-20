@@ -4,13 +4,13 @@ ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json='{"working_dir": "/home/jovyan/notebook/zhouyang/OpenRLHF"}' \
    -- python3 -m openrlhf.cli.train_ppo_ray \
    --ref_num_nodes 1 \
-   --ref_num_gpus_per_node 1 \
+   --ref_num_gpus_per_node  \
    --reward_num_nodes 1 \
    --reward_num_gpus_per_node 1 \
    --critic_num_nodes 1 \
-   --critic_num_gpus_per_node 1 \
+   --critic_num_gpus_per_node 2 \
    --actor_num_nodes 1 \
-   --actor_num_gpus_per_node 1 \
+   --actor_num_gpus_per_node 2 \
    --vllm_num_engines 1 \
    --vllm_tensor_parallel_size 1 \
    --colocate_critic_reward \
