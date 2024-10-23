@@ -81,6 +81,7 @@ def train(args):
     strategy.print(critic)
 
     # load weights for reference actor
+    #创建reference model
     initial_model = Actor(
         args.pretrain,
         use_flash_attention_2=args.flash_attn,
@@ -90,6 +91,7 @@ def train(args):
     )
     get_tokenizer(args.pretrain, initial_model.model, "left", strategy)
 
+    #是否启动EMA
     if args.enable_ema:
         ema_model = Actor(
             args.pretrain,
@@ -101,7 +103,7 @@ def train(args):
     else:
         ema_model = None
 
-    # gradient_checkpointing
+    # gradient_checkpointing梯度检查点技术
     if args.gradient_checkpointing:
         actor.gradient_checkpointing_enable(
             gradient_checkpointing_kwargs={"use_reentrant": args.gradient_checkpointing_use_reentrant}
@@ -110,7 +112,7 @@ def train(args):
             gradient_checkpointing_kwargs={"use_reentrant": args.gradient_checkpointing_use_reentrant}
         )
 
-    # configure optimizer
+    # configure optimizer 定义a和c的优化器
     actor_optim = strategy.create_optimizer(
         actor, lr=args.actor_learning_rate, betas=args.adam_betas, weight_decay=args.l2
     )
@@ -118,7 +120,7 @@ def train(args):
         critic, lr=args.critic_learning_rate, betas=args.adam_betas, weight_decay=args.l2
     )
 
-    # prepare datasets
+    # prepare datasets将多个数据集按照指定的比例混合，并返回一个训练集。
     prompts_data = blending_datasets(
         args.prompt_data,
         args.prompt_data_probs,
@@ -170,7 +172,7 @@ def train(args):
     else:
         pretrain_dataloader = None
 
-    # configure scheduler
+    # configure scheduler  动态调整优化器
     num_update_steps_per_episodes = (
         len(prompts_dataset) * args.n_samples_per_prompt // args.train_batch_size * args.max_epochs
     )
