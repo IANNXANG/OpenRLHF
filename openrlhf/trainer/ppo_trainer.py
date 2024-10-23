@@ -262,6 +262,7 @@ class PPOTrainer(ABC):
         device = torch.cuda.current_device()
 
         status_list = []
+
         status_mean = {}
         for epoch in range(self.max_epochs):
             pbar = tqdm(
