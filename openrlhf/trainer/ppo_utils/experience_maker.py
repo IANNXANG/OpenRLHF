@@ -85,6 +85,7 @@ class Experience:
 class NaiveExperienceMaker(ABC):
     """
     Naive experience maker.
+    生成强化学习中的经验数据（Experience对象）。它结合了演员模型（actor）、评论家模型（critic）、奖励模型（reward_model）和初始模型（initial_model）等组件
     """
 
     def __init__(
@@ -143,6 +144,8 @@ class NaiveExperienceMaker(ABC):
         # generate seq
         inputs = self.tokenize_fn(prompts, self.prompt_max_len, device="cuda")
         sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
+        #如果序列中的元素既不是结束标记也不是填充标记，那么对应的attention_mask位置为 1，否则为 0。
+        #action_mask中的值为True或False，表示相应位置是否可以作为动作位置。
         num_actions = action_mask.size(1)
 
         # log probs

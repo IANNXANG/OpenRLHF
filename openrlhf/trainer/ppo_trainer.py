@@ -327,7 +327,7 @@ class PPOTrainer(ABC):
         if isinstance(experience.sequences, list):
             sequences = torch.cat(experience.sequences, dim=0).unsqueeze(0)
             old_action_log_probs = torch.cat(experience.action_log_probs, dim=0).unsqueeze(0)
-            advantages = torch.cat(experience.advantages, dim=0).unsqueeze(0)
+            advantages = torch.cat(experience.advantages, dim=0).unsqueeze(0)  #将经验对象experience中的优势列表进行拼接
             num_actions = [v.numel() for v in experience.values]
             packed_seq_lens = [s.numel() for s in experience.sequences]
             attention_mask = torch.cat(
@@ -350,12 +350,12 @@ class PPOTrainer(ABC):
             packed_seq_lens=packed_seq_lens,
         )
 
-        # loss function
+        # loss function  调用loss
         actor_loss = self.actor_loss_fn(
             action_log_probs,
             old_action_log_probs,
             advantages,
-            action_mask=experience.action_mask,
+            action_mask=experience.action_mask,  #动作掩码从experience中来
         )
         # mixtral
         if self.aux_loss:

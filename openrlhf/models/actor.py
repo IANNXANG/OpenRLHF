@@ -166,7 +166,7 @@ class Actor(nn.Module):
         attention_mask = (mask >= first_token_indices) & (mask <= eos_indices).to(dtype=torch.long)
 
         # in RL, state_i (current token) + action_i (next token) -> state_i+1 (next token)
-        state_seq = sequences[:, input_len - 1 : -1]
+        state_seq = sequences[:, input_len - 1 : -1]  #生成部分
         action_mask = state_seq.ne(eos_token_id) & state_seq.ne(pad_token_id)
         action_mask[:, 0] = 1
 
