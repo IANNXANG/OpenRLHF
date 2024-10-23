@@ -38,6 +38,7 @@ def get_llm_for_sequence_regression(
     value_head_prefix="value_head",
     device_map=None,
     packing_samples=False,
+    vocab_size:int=1,
     **kwargs,
 ) -> nn.Module:
     """Get transformer with a sequence classification head on top (linear layer).
@@ -63,12 +64,13 @@ def get_llm_for_sequence_regression(
     config._attn_implementation = "flash_attention_2" if use_flash_attention_2 else "eager"
 
     try:
+        # config: BertConfig->BertModel, GPT2Config->GPT2Model, T5Config->T5Model, etc.
         base_class = AutoModel._model_mapping[type(config)]
         base_pretrained_class = base_class.__base__
         if model_type == "reward":
-            cls_class = _get_reward_model(base_pretrained_class, base_class, value_head_prefix, packing_samples)
+            cls_class = _get_reward_model(base_pretrained_class, base_class, value_head_prefix, packing_samples, vocab_size=vocab_size)
         else:
-            cls_class = _get_critic_model(base_pretrained_class, base_class, value_head_prefix, packing_samples)
+            cls_class = _get_critic_model(base_pretrained_class, base_class, value_head_prefix, packing_samples, vocab_size=vocab_size)
     except Exception as e:
         print("Failed to load from AutoModel, construct from modelling file.")
         module_file, causal_model_name = config.auto_map["AutoModelForCausalLM"].split(".")
@@ -94,9 +96,9 @@ def get_llm_for_sequence_regression(
         )
         base_class = get_class_from_dynamic_module(f"{module_file}.{auto_model_name}", model_name_or_path)
         if model_type == "reward":
-            cls_class = _get_reward_model(base_pretrained_class, base_class, value_head_prefix, packing_samples)
+            cls_class = _get_reward_model(base_pretrained_class, base_class, value_head_prefix, packing_samples, vocab_size=vocab_size)
         else:
-            cls_class = _get_critic_model(base_pretrained_class, base_class, value_head_prefix, packing_samples)
+            cls_class = _get_critic_model(base_pretrained_class, base_class, value_head_prefix, packing_samples, vocab_size=vocab_size)
 
     # Note: dschf is defined in function scope to avoid global effects
     # https://huggingface.co/docs/transformers/main_classes/deepspeed#nontrainer-deepspeed-integration
@@ -172,7 +174,7 @@ def get_llm_for_sequence_regression(
     return model
 
 
-def _get_reward_model(base_pretrained_model, base_llm_model, value_head_prefix="value_head", packing_samples=False):
+def _get_reward_model(base_pretrained_model, base_llm_model, value_head_prefix="value_head", packing_samples=False, vocab_size:int=1):
     class RewardModel(base_pretrained_model):
         supports_gradient_checkpointing = True
 
@@ -181,7 +183,8 @@ def _get_reward_model(base_pretrained_model, base_llm_model, value_head_prefix="
             setattr(self, self.base_model_prefix, base_llm_model(config))
 
             self.value_head_prefix = value_head_prefix
-            setattr(self, value_head_prefix, nn.Linear(config.hidden_size, 1, bias=False))
+
+            setattr(self, value_head_prefix, nn.Linear(config.hidden_size, vocab_size, bias=False))
 
             self.packing_samples = packing_samples
 
@@ -243,7 +246,7 @@ def _get_reward_model(base_pretrained_model, base_llm_model, value_head_prefix="
     return RewardModel
 
 
-def _get_critic_model(base_pretrained_model, base_llm_model, value_head_prefix="value_head", packing_samples=False):
+def _get_critic_model(base_pretrained_model, base_llm_model, value_head_prefix="value_head", packing_samples=False, vocab_size:int=1):
     class CriticModel(base_pretrained_model):
         supports_gradient_checkpointing = True
 
@@ -252,7 +255,7 @@ def _get_critic_model(base_pretrained_model, base_llm_model, value_head_prefix="
             setattr(self, self.base_model_prefix, base_llm_model(config))
 
             self.value_head_prefix = value_head_prefix
-            setattr(self, value_head_prefix, nn.Linear(config.hidden_size, 1, bias=False))
+            setattr(self, value_head_prefix, nn.Linear(config.hidden_size, vocab_size, bias=False))
 
             self.packing_samples = packing_samples
 
