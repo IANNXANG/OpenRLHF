@@ -11,8 +11,8 @@ ray job submit --address="http://127.0.0.1:8265" \
    --critic_num_gpus_per_node 4 \
    --actor_num_nodes 1 \
    --actor_num_gpus_per_node 4 \
-   --vllm_num_engines 1 \
-   --vllm_tensor_parallel_size 1 \
+   --vllm_num_engines 2 \
+   --vllm_tensor_parallel_size 2 \
    --colocate_critic_reward \
    --colocate_actor_ref \
    --pretrain Qwen/Qwen2.5-Math-1.5B-Instruct \
