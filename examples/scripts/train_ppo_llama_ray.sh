@@ -11,19 +11,19 @@ ray job submit --address="http://127.0.0.1:8265" \
    --reward_num_gpus_per_node 1 \
    --critic_num_nodes 1 \
    --critic_num_gpus_per_node 1 \
-   --vllm_num_engines 2 \
-   --vllm_tensor_parallel_size 2 \
+   --vllm_num_engines 1 \
+   --vllm_tensor_parallel_size 1 \
    --ref_reward_offload \
-   --pretrain /home/jovyan/share/LLMAgent/model/Llama-3.2-1B-Instruct \
-   --reward_pretrain Ray2333/Gemma-2B-rewardmodel-ft \
+   --pretrain /pubshare/zy/cache/Llama-3-8b-sft-mixture \
+   --reward_pretrain /pubshare/zy/cache/Llama-3-8b-rm-mixture \
    --save_path /pubshare/zy/cache/checkpoint/llama-3-8b-rlhf \
-   --micro_train_batch_size 8 \
-   --train_batch_size 128 \
-   --micro_rollout_batch_size 12 \
-   --rollout_batch_size 1024 \
+   --micro_train_batch_size 1 \
+   --train_batch_size 1 \
+   --micro_rollout_batch_size 1 \
+   --rollout_batch_size 1 \
    --max_samples 100000 \
    --max_epochs 1 \
-   --prompt_max_len 1024 \
+   --prompt_max_len 512 \
    --generate_max_len 512 \
    --zero_stage 3 \
    --bf16 \
