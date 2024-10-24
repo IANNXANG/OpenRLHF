@@ -11,6 +11,8 @@ ray job submit --address="http://127.0.0.1:8265" \
    --reward_num_gpus_per_node 1 \
    --critic_num_nodes 1 \
    --critic_num_gpus_per_node 1 \
+   --vllm_num_engines 2 \
+   --vllm_tensor_parallel_size 2 \
    --colocate_critic_reward \
    --colocate_actor_ref \
    --ref_reward_offload \
@@ -41,5 +43,3 @@ ray job submit --address="http://127.0.0.1:8265" \
    --use_wandb {wandb_token}
 # --runtime-env-json='{"setup_commands": ["pip install openrlhf[vllm]"]}' [Install deps]
 # --ref_reward_offload [Offload to CPU]
-#   --vllm_num_engines 0 \
-#   --vllm_tensor_parallel_size 2 \
