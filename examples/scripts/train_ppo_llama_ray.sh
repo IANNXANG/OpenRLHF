@@ -13,8 +13,6 @@ ray job submit --address="http://127.0.0.1:8265" \
    --critic_num_gpus_per_node 1 \
    --vllm_num_engines 2 \
    --vllm_tensor_parallel_size 2 \
-   --colocate_critic_reward \
-   --colocate_actor_ref \
    --ref_reward_offload \
    --pretrain /home/jovyan/share/LLMAgent/model/Llama-3.2-1B-Instruct \
    --reward_pretrain Ray2333/Gemma-2B-rewardmodel-ft \
@@ -41,5 +39,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --gradient_checkpointing \
    --load_checkpoint \
    --use_wandb {wandb_token}
+#   --colocate_critic_reward \
+#   --colocate_actor_ref \
 # --runtime-env-json='{"setup_commands": ["pip install openrlhf[vllm]"]}' [Install deps]
 # --ref_reward_offload [Offload to CPU]
