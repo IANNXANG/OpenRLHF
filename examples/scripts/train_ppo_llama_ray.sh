@@ -35,7 +35,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --input_key prompt \
    --apply_chat_template \
    --normalize_reward \
-   --adam_offload "True" \
+   --adam_offload  \
    --flash_attn \
    --gradient_checkpointing \
    --load_checkpoint \
