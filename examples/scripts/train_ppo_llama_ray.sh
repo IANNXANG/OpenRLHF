@@ -11,8 +11,8 @@ ray job submit --address="http://127.0.0.1:8265" \
    --critic_num_gpus_per_node 1 \
    --actor_num_nodes 1 \
    --actor_num_gpus_per_node 1 \
-   --vllm_num_engines 2 \
-   --vllm_tensor_parallel_size 2 \
+   --vllm_num_engines 1 \
+   --vllm_tensor_parallel_size 1 \
    --colocate_critic_reward \
    --colocate_actor_ref \
    --pretrain /home/jovyan/share/LLMAgent/model/Llama-3.2-1B-Instruct \
