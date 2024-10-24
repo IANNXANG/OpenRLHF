@@ -110,6 +110,7 @@ class Actor(nn.Module):
         else:
             self.model = pretrain_or_model
 
+    # 策略生成  生成下一个 token 的概率分布  支持多种采样策略，如 top-k 采样、top-p 采样和温度采样
     @torch.no_grad()
     def generate(self, input_ids: torch.Tensor, **kwargs) -> Union[
         Tuple[torch.LongTensor, torch.LongTensor],

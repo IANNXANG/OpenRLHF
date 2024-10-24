@@ -15,7 +15,7 @@ from openrlhf.utils import blending_datasets, get_strategy, get_tokenizer
 
 def train(args):
     # configure strategy
-    strategy = get_strategy(args)
+    strategy = get_strategy(args)  #是一个deepspeed类
     strategy.setup_distributed()
 
     # configure model
@@ -91,7 +91,7 @@ def train(args):
         multiple_of=args.ring_attn_size,
     )
 
-    # prepare dataloader
+    # prepare dataloader dataloader对象
     train_dataloader = strategy.setup_dataloader(
         train_dataset,
         args.micro_train_batch_size,

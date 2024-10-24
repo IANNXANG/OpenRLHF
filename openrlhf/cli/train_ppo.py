@@ -21,7 +21,7 @@ def train(args):
 
     # configure model
     # load huggingface model
-    actor = Actor(  #创建一个 Actor 对象nn.Module)
+    actor = Actor(  #创建一个 Actor 对象nn.Module
         args.pretrain,
         use_flash_attention_2=args.flash_attn,
         bf16=args.bf16,
@@ -401,4 +401,4 @@ if __name__ == "__main__":
     if args.input_template and not "{}" in args.input_template:
         print("[Warning] {} not in args.input_template, set to None")
         args.input_template = None
-    train(args)
+    train(args)  #启动！
