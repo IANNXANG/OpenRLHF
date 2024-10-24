@@ -13,6 +13,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --critic_num_gpus_per_node 1 \
    --colocate_critic_reward \
    --colocate_actor_ref \
+   --ref_reward_offload \
    --pretrain /home/jovyan/share/LLMAgent/model/Llama-3.2-1B-Instruct \
    --reward_pretrain Ray2333/Gemma-2B-rewardmodel-ft \
    --save_path /pubshare/zy/cache/checkpoint/llama-3-8b-rlhf \
@@ -20,9 +21,9 @@ ray job submit --address="http://127.0.0.1:8265" \
    --train_batch_size 128 \
    --micro_rollout_batch_size 12 \
    --rollout_batch_size 1024 \
-   --max_samples 10000 \
+   --max_samples 100000 \
    --max_epochs 1 \
-   --prompt_max_len 512 \
+   --prompt_max_len 1024 \
    --generate_max_len 512 \
    --zero_stage 2 \
    --bf16 \
@@ -33,7 +34,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --input_key prompt \
    --apply_chat_template \
    --normalize_reward \
-   --adam_offload  \
+   --adam_offload \
    --flash_attn \
    --gradient_checkpointing \
    --load_checkpoint \
