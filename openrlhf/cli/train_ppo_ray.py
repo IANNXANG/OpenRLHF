@@ -49,7 +49,7 @@ def train(args):
     pg = None
     if args.colocate_actor_ref:
         assert (
-            args.actor_num_nodes == args.ref_num_nodes and args.actor_num_gpus_per_node == args.ref_num_gpus_per_node
+            args.actor_num_nodes == args.ref_num_nodes and args.actor_num_gpus_per_node == args.ref_num_gpus_per_node  #A=C
         ), f"num_nodes and num_gpus_per_node must be the same when colocate actor and ref model."
 
         bundles = [

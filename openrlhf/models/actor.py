@@ -135,7 +135,7 @@ class Actor(nn.Module):
         if kwargs.get("max_length", None):
             generate_args["max_length"] = kwargs.get("max_length")
 
-        # Call generate
+        # Call generate     产生句子
         sequences = self.model.generate(**generate_args)
 
         # Prepare mask tensor

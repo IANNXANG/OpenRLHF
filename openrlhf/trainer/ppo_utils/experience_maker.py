@@ -144,8 +144,9 @@ class NaiveExperienceMaker(ABC):
         # generate seq
         inputs = self.tokenize_fn(prompts, self.prompt_max_len, device="cuda")
         sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
+        #调用actor模型的位置
         #如果序列中的元素既不是结束标记也不是填充标记，那么对应的attention_mask位置为 1，否则为 0。
-        #action_mask中的值为True或False，表示相应位置是否可以作为动作位置。
+        #action_mask中的值为True或False，表示相应位置是否可以作为动作位置，输出部分的有效值。
         num_actions = action_mask.size(1)
 
         # log probs
@@ -156,6 +157,7 @@ class NaiveExperienceMaker(ABC):
 
         # values
         value = self.critic(sequences, num_actions, attention_mask)
+        #调用criticmodel生成value
 
         # rewards
         if self.remote_rm_url is not None:
@@ -165,6 +167,7 @@ class NaiveExperienceMaker(ABC):
         else:
             # local RM
             r = self.reward_model(sequences, attention_mask)
+            #调用rewardmodel生成reward
 
         reward, kl = compute_reward(
             r,

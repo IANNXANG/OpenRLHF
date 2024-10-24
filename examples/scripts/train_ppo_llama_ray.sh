@@ -4,24 +4,24 @@ ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json='{"working_dir": "/home/jovyan/notebook/zhouyang/OpenRLHF"}' \
    -- python3 -m openrlhf.cli.train_ppo_ray \
    --ref_num_nodes 1 \
-   --ref_num_gpus_per_node 4 \
+   --ref_num_gpus_per_node 1 \
    --reward_num_nodes 1 \
-   --reward_num_gpus_per_node 4 \
+   --reward_num_gpus_per_node 1 \
    --critic_num_nodes 1 \
-   --critic_num_gpus_per_node 4 \
+   --critic_num_gpus_per_node 1 \
    --actor_num_nodes 1 \
-   --actor_num_gpus_per_node 4 \
+   --actor_num_gpus_per_node 1 \
    --vllm_num_engines 2 \
    --vllm_tensor_parallel_size 2 \
    --colocate_critic_reward \
    --colocate_actor_ref \
-   --pretrain Qwen/Qwen2.5-Math-1.5B-Instruct \
+   --pretrain /home/jovyan/share/LLMAgent/model/Llama-3.2-1B-Instruct \
    --reward_pretrain OpenRLHF/Llama-3-8b-rm-mixture \
    --save_path /pubshare/zy/cache/checkpoint/llama-3-8b-rlhf \
    --micro_train_batch_size 2 \
-   --train_batch_size 128 \
+   --train_batch_size 2 \
    --micro_rollout_batch_size 4 \
-   --rollout_batch_size 1024 \
+   --rollout_batch_size 4 \
    --max_samples 10000 \
    --max_epochs 1 \
    --prompt_max_len 1024 \
