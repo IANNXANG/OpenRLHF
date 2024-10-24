@@ -25,7 +25,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --max_epochs 1 \
    --prompt_max_len 1024 \
    --generate_max_len 512 \
-   --zero_stage 2 \
+   --zero_stage 3 \
    --bf16 \
    --actor_learning_rate 5e-7 \
    --critic_learning_rate 9e-6 \
