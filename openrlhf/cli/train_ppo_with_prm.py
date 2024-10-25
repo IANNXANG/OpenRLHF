@@ -12,6 +12,7 @@ from openrlhf.datasets import PromptDataset, SFTDataset
 from openrlhf.models import Actor, get_llm_for_sequence_regression
 from openrlhf.trainer import PPOTrainer
 from openrlhf.utils import blending_datasets, get_strategy, get_tokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 import debugpy
 import copy
 
@@ -47,7 +48,7 @@ def train(args):
     critic = get_llm_for_sequence_regression(
         args.critic_pretrain,
         "critic",
-        normalize_reward=args.normalize_reward,
+        # normalize_reward=args.normalize_reward,
         use_flash_attention_2=args.flash_attn,
         bf16=args.bf16,
         load_in_4bit=args.load_in_4bit,
@@ -56,30 +57,46 @@ def train(args):
         target_modules=args.target_modules,
         lora_dropout=args.lora_dropout,
         ds_config=strategy.get_ds_train_config(is_actor=False),
-        value_head_prefix=args.value_head_prefix,
+        value_head_prefix='lm_head',
+        vocab_size=32000,
         init_value_head=strategy.args.pretrain == strategy.args.critic_pretrain,
     )
+
+    # critic = AutoModelForCausalLM.from_pretrained(
+    #     args.critic_pretrain, 
+    #     torch_dtype=torch.bfloat16 if args.bf16 else 'auto', 
+    #     attn_implementation='flash_attention_2' if args.flash_attn else None
+    # )
+    critic_tokenizer = get_tokenizer(args.critic_pretrain, critic, "left", strategy, use_fast=not args.disable_fast_tokenizer)
 
     if not args.remote_rm_url:
         reward_model = get_llm_for_sequence_regression(
             args.reward_pretrain,
             "reward",
-            normalize_reward=args.normalize_reward,
+            # normalize_reward=args.normalize_reward,
             use_flash_attention_2=args.flash_attn,
             bf16=args.bf16,
             load_in_4bit=args.load_in_4bit,
             ds_config=strategy.get_ds_train_config(is_actor=False),
-            value_head_prefix=args.value_head_prefix,
+            value_head_prefix='lm_head',
+            vocab_size=32000
         )
-        get_tokenizer(args.reward_pretrain, reward_model, "left", strategy, use_fast=not args.disable_fast_tokenizer)
+        # get_tokenizer(args.reward_pretrain, reward_model, "left", strategy, use_fast=not args.disable_fast_tokenizer)
+        # reward_model = AutoModelForCausalLM.from_pretrained(
+        #     args.reward_pretrain, 
+        #     torch_dtype=torch.bfloat16 if args.bf16 else 'auto', 
+        #     attn_implementation='flash_attention_2' if args.flash_attn else None
+        # )
+        reward_tokenizer = AutoTokenizer.from_pretrained(args.reward_pretrain)
     else:
         reward_model = None
 
-    strategy.print("reward normalization status: {}".format(args.normalize_reward))
-    strategy.print("mean: {}, std {}".format(critic.mean, critic.std))
+    # strategy.print("reward normalization status: {}".format(args.normalize_reward))
+    # strategy.print("mean: {}, std {}".format(critic.mean, critic.std))
 
     # configure tokenizer
     tokenizer = get_tokenizer(args.pretrain, actor.model, "left", strategy, use_fast=not args.disable_fast_tokenizer)
+    # tokenizer = critic_tokenizer
     get_tokenizer(args.critic_pretrain, critic, "left", strategy, use_fast=not args.disable_fast_tokenizer)
 
     strategy.print(actor)
@@ -93,19 +110,6 @@ def train(args):
         load_in_4bit=args.load_in_4bit,
         ds_config=strategy.get_ds_eval_config(offload=False),
     )
-    # initial_model = Actor(
-    #     args.pretrain,
-    #     use_flash_attention_2=args.flash_attn,
-    #     bf16=args.bf16,
-    #     load_in_4bit=args.load_in_4bit,
-    #     lora_rank=args.lora_rank,
-    #     lora_alpha=args.lora_alpha,
-    #     target_modules=args.target_modules,
-    #     lora_dropout=args.lora_dropout,
-    #     ds_config=strategy.get_ds_train_config(is_actor=True),
-    # )
-    # initial_model = copy.deepcopy(actor)
-
     get_tokenizer(args.pretrain, initial_model.model, "left", strategy)
 
     if args.enable_ema:
@@ -255,6 +259,7 @@ def train(args):
         micro_rollout_batch_size=args.micro_rollout_batch_size,
         gradient_checkpointing=args.gradient_checkpointing,
         tokenizer=tokenizer,
+        critic_tokenizer=critic_tokenizer,
         prompt_max_len=args.prompt_max_len,
         value_clip=args.value_clip,
         eps_clip=args.eps_clip,
@@ -275,6 +280,7 @@ def train(args):
         eos_token_id=tokenizer.eos_token_id,
         # remote reward model
         remote_rm_url=args.remote_rm_url,
+        train_with_prm=True,
     )
 
     trainer.fit(args, prompts_dataloader, pretrain_dataloader, consumed_samples, num_update_steps_per_episodes)
@@ -402,7 +408,7 @@ if __name__ == "__main__":
         type=str,
         default="ppo_%s" % datetime.now().strftime("%m%dT%H:%M"),
     )
-
+    
     # TensorBoard parameters
     parser.add_argument("--use_tensorboard", type=str, default=None, help="TensorBoard logging path")
 

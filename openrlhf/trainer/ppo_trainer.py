@@ -16,7 +16,7 @@ from openrlhf.models import Actor, GPTLMLoss, PolicyLoss, ValueLoss
 from openrlhf.models.utils import masked_mean
 from openrlhf.utils.distributed_sampler import DistributedSampler
 
-from .ppo_utils import AdaptiveKLController, Experience, FixedKLController, NaiveExperienceMaker, NaiveReplayBuffer
+from .ppo_utils import AdaptiveKLController, Experience, FixedKLController, NaiveExperienceMaker, NaiveReplayBuffer, PRMExperienceMaker
 
 
 class PPOTrainer(ABC):
@@ -59,6 +59,7 @@ class PPOTrainer(ABC):
         critic_optim: Optimizer,
         actor_scheduler,
         critic_scheduler,
+        train_with_prm: bool = False,
         ema_beta: float = 0.992,
         init_kl_coef: float = 0.001,
         kl_target: float = None,
@@ -74,6 +75,7 @@ class PPOTrainer(ABC):
         max_epochs: int = 1,
         max_norm: float = 1.0,
         tokenizer: Optional[Callable[[Any], dict]] = None,
+        critic_tokenizer: Optional[Callable[[Any], dict]] = None,
         prompt_max_len: int = 128,
         dataloader_pin_memory: bool = True,
         remote_rm_url: str = None,
@@ -90,6 +92,7 @@ class PPOTrainer(ABC):
         self.micro_rollout_batch_size = micro_rollout_batch_size
         self.max_epochs = max_epochs
         self.tokenizer = tokenizer
+        self.critic_tokenizer = critic_tokenizer
         self.generate_kwargs = generate_kwargs
         self.dataloader_pin_memory = dataloader_pin_memory
         self.max_norm = max_norm
@@ -100,6 +103,8 @@ class PPOTrainer(ABC):
         self.ema_beta = ema_beta
         self.gradient_checkpointing = gradient_checkpointing
         self.reward_fn = reward_fn
+
+        self.train_with_prm = train_with_prm
 
         self.actor = actor
         self.critic = critic
@@ -125,13 +130,17 @@ class PPOTrainer(ABC):
             self.kl_ctl = AdaptiveKLController(init_kl_coef, kl_target, kl_horizon)
         else:
             self.kl_ctl = FixedKLController(init_kl_coef)
-
-        self.experience_maker = NaiveExperienceMaker(
+        if train_with_prm:
+            ExperienceMakerClass = PRMExperienceMaker
+        else:
+            ExperienceMakerClass = NaiveExperienceMaker
+        self.experience_maker = ExperienceMakerClass(
             actor,
             critic,
             reward_model,
             initial_model,
             tokenizer,
+            critic_tokenizer,
             prompt_max_len,
             self.kl_ctl,
             strategy,
@@ -219,19 +228,20 @@ class PPOTrainer(ABC):
                 rand_prompts = sum([[prompt] * args.n_samples_per_prompt for prompt in rand_prompts], [])
                 for i in range(0, len(rand_prompts), args.micro_rollout_batch_size):
                     prompts = rand_prompts[i : i + args.micro_rollout_batch_size]
+                    self.strategy.print('='*30+'start to make experience'+'='*30)
                     experience = self.experience_maker.make_experience(prompts, **self.generate_kwargs)
+                    self.strategy.print('='*30+'end to make experience'+'='*30)
                     if i == 0:
                         output = self.tokenizer.batch_decode(
                             experience.sequences[0].unsqueeze(0), skip_special_tokens=True
                         )
                         self.strategy.print(output)
                     self.replay_buffer.append(experience)
-
                 torch.cuda.empty_cache()
                 self.replay_buffer.normalize("advantages", self.strategy)
                 status = self.ppo_train(steps)
                 self.replay_buffer.clear()
-                torch.cuda.empty_cache()
+                torch.cuda.empty_cache() 
 
                 if "kl" in status:
                     self.kl_ctl.update(status["kl"], args.rollout_batch_size * args.n_samples_per_prompt)
@@ -428,20 +438,32 @@ class PPOTrainer(ABC):
             attention_mask = experience.attention_mask
 
         # critic loss
-        values, output = self.critic(
-            sequences,
-            num_actions=num_actions,
-            attention_mask=attention_mask,
-            return_output=True,
-            packed_seq_lens=packed_seq_lens,
-        )
+        if self.train_with_prm:
+            values, output = self.experience_maker.compute_value_from_sequences(
+                sequences, 
+                attention_mask, 
+                input_len=-1, 
+                num_actions=num_actions,
+                return_output=True
+            )
+        else:
+            values, output = self.critic(
+                sequences,
+                num_actions=num_actions,
+                attention_mask=attention_mask,
+                return_output=True,
+                packed_seq_lens=packed_seq_lens,
+            )
         # loss function
-        critic_loss = self.critic_loss_fn(
-            values,
-            old_values,
-            returns,
-            action_mask=experience.action_mask,
-        )
+        try:
+            critic_loss = self.critic_loss_fn(
+                values,
+                old_values,
+                returns,
+                action_mask=experience.action_mask,
+            )
+        except:
+            breakpoint()
         # mixtral
         if self.aux_loss:
             aux_loss = output.aux_loss

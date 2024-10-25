@@ -53,8 +53,13 @@ def compute_reward(
         #             last_reward[i][t] = r[i]
         #             break
         #
-        eos_indices = action_mask.size(1) - 1 - action_mask.long().fliplr().argmax(dim=1, keepdim=True)
-        last_reward = torch.zeros_like(kl).scatter_(dim=1, index=eos_indices, src=r.unsqueeze(1).to(kl.dtype))
+        # fliplr This is a PyTorch function that flips the tensor left to right (horizontally). It reverses the elements along the last dimension (i.e., columns).
+        # !=2认为等于1，1就是原来的，2是我用prm的
+        if len(action_mask.size()) != 2:
+            eos_indices = action_mask.size(1) - 1 - action_mask.long().fliplr().argmax(dim=1, keepdim=True)
+            last_reward = torch.zeros_like(kl).scatter_(dim=1, index=eos_indices, src=r.unsqueeze(1).to(kl.dtype))
+        else:
+            last_reward = r
     else:
         # The following code is equivalent to:
         #

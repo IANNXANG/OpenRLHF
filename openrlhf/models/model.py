@@ -223,6 +223,7 @@ def _get_reward_model(base_pretrained_model, base_llm_model, value_head_prefix="
                 input_ids, attention_mask=attention_mask, position_ids=position_ids
             )
             last_hidden_states = outputs["last_hidden_state"]
+
             values = getattr(self, self.value_head_prefix)(last_hidden_states).squeeze(-1)
 
             if self.packing_samples:
@@ -235,8 +236,12 @@ def _get_reward_model(base_pretrained_model, base_llm_model, value_head_prefix="
                 eos_indices = packed_seq_lens.cumsum(dim=0) - 1
                 reward = reward.squeeze(0).gather(dim=0, index=eos_indices)
             else:
-                eos_indices = attention_mask.size(1) - 1 - attention_mask.long().fliplr().argmax(dim=1, keepdim=True)
-                reward = values.gather(dim=1, index=eos_indices).squeeze(1)
+                # logits信息就好了
+                if self.value_head_prefix == 'lm_head':
+                    reward = values
+                else:
+                    eos_indices = attention_mask.size(1) - 1 - attention_mask.long().fliplr().argmax(dim=1, keepdim=True)
+                    reward = values.gather(dim=1, index=eos_indices).squeeze(1)
 
             if not self.training and self.normalize_reward:
                 reward = (reward - self.mean) / self.std
@@ -289,7 +294,12 @@ def _get_critic_model(base_pretrained_model, base_llm_model, value_head_prefix="
                 input_ids, attention_mask=attention_mask, position_ids=position_ids
             )
             last_hidden_states = outputs["last_hidden_state"]
-            values = getattr(self, self.value_head_prefix)(last_hidden_states).squeeze(-1)[:, :-1]
+
+            # 原来的才这样操作
+            if self.value_head_prefix != 'lm_head':
+                values = getattr(self, self.value_head_prefix)(last_hidden_states).squeeze(-1)[:, :-1]
+            else:
+                values = getattr(self, self.value_head_prefix)(last_hidden_states)
 
             # normalize reward
             if self.normalize_reward:

@@ -57,6 +57,7 @@ def split_experience_batch(experience: Experience) -> List[BufferItem]:
             continue
         vals = value
         if isinstance(vals, torch.Tensor):
+            # 沿着第0维，拆分成多个向量
             vals = torch.unbind(vals)
         assert batch_size == len(vals)
         for i, v in enumerate(vals):
@@ -69,7 +70,9 @@ def split_experience_batch(experience: Experience) -> List[BufferItem]:
         assert batch_size == len(vals)
         for i, vv in enumerate(vals):
             if isinstance(vv, torch.Tensor):
+                # numel 返回元素个数
                 assert vv.numel() == 1, f"info[{k}] must be a scalar tensor, but got {vv.shape}"
+                # item() 返回一个标量值
                 vv = vv.item()
             batch_kwargs[i]["info"][k] = vv
 

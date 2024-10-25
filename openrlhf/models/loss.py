@@ -65,13 +65,16 @@ class ValueLoss(nn.Module):
         returns: torch.Tensor,
         action_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        if self.clip_eps is not None:
-            values_clipped = old_values + (values - old_values).clamp(-self.clip_eps, self.clip_eps)
-            surr1 = (values_clipped - returns) ** 2
-            surr2 = (values - returns) ** 2
-            loss = torch.max(surr1, surr2)
-        else:
-            loss = (values - returns) ** 2
+        try:
+            if self.clip_eps is not None:
+                values_clipped = old_values + (values - old_values).clamp(-self.clip_eps, self.clip_eps)
+                surr1 = (values_clipped - returns) ** 2
+                surr2 = (values - returns) ** 2
+                loss = torch.max(surr1, surr2)
+            else:
+                loss = (values - returns) ** 2
+        except:
+            breakpoint()
 
         loss = masked_mean(loss, action_mask, dim=-1).mean()
         return 0.5 * loss

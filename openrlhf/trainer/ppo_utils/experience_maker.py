@@ -94,6 +94,7 @@ class NaiveExperienceMaker(ABC):
         reward_model: nn.Module,
         initial_model: Actor,
         tokenizer,
+        critic_tokenizer,
         prompt_max_len: int,
         kl_controller,
         strategy=None,
@@ -107,22 +108,25 @@ class NaiveExperienceMaker(ABC):
         self.remote_rm_url = remote_rm_url
         self.initial_model = initial_model
         self.tokenizer = tokenizer
+        self.critic_tokenizer = critic_tokenizer
         self.prompt_max_len = prompt_max_len
         self.kl_ctl = kl_controller
         self.strategy = strategy
         self.reward_fn = reward_fn
 
     # tokenizer
-    def tokenize_fn(self, texts, max_length, padding=True, device=None):
+    def tokenize_fn(self, texts, max_length, padding=True, device=None, tokenizer=None):
+        if tokenizer is None:
+            tokenizer = self.tokenizer
         if not padding:
             # when padding is False, return tokenized texts as list
-            return self.tokenizer(
+            return tokenizer(
                 texts,
                 add_special_tokens=False,
                 max_length=max_length,
                 truncation=True,
             )
-        batch = self.tokenizer(
+        batch = tokenizer(
             texts,
             return_tensors="pt",
             add_special_tokens=False,
@@ -142,19 +146,38 @@ class NaiveExperienceMaker(ABC):
 
         # generate seq
         inputs = self.tokenize_fn(prompts, self.prompt_max_len, device="cuda")
+        
+        self.strategy.print('actor use gpu:'+str(next(self.actor.parameters()).is_cuda))
+        self.strategy.print('='*30+'actor start to generate sequences'+30*'=')
         sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
+        self.strategy.print('='*30+'actor finish generating sequences'+30*'=')
         num_actions = action_mask.size(1)
 
+
         # log probs
+        self.strategy.print('='*30+'actor start to get log probs'+30*'=')
         action_log_probs = self.actor(sequences, num_actions, attention_mask)
+        self.strategy.print('='*30+'actor finish getting log probs'+30*'=')
 
         # init log probs
+        self.strategy.print('initial model use gpu:'+str(next(self.initial_model.parameters()).is_cuda))
+        # for parameter in self.initial_model.parameters():
+        #     if not parameter.is_cuda:
+        #         self.strategy.print('initial model parameter not on gpu')
+        #         breakpoint()
+        self.strategy.print('='*30+'initial model start to get log probs'+30*'=')
         base_action_log_probs = self.initial_model(sequences, num_actions, attention_mask)
+        self.strategy.print('='*30+'initial model finish getting log probs'+30*'=')
 
         # values
+        self.strategy.print('critic use gpu:'+str(next(self.critic.parameters()).is_cuda))
+        self.strategy.print('='*30+'critic start to get values'+30*'=')
         value = self.critic(sequences, num_actions, attention_mask)
+        self.strategy.print('='*30+'critic finish getting values'+30*'=')
 
         # rewards
+        self.strategy.print('reward model use gpu:'+str(next(self.reward_model.parameters()).is_cuda))
+        self.strategy.print('='*30+'reward model start to get rewards'+30*'=')
         if self.remote_rm_url is not None:
             # remote RM
             queries = self.tokenizer.batch_decode(sequences.cpu(), skip_special_tokens=False)
@@ -162,7 +185,9 @@ class NaiveExperienceMaker(ABC):
         else:
             # local RM
             r = self.reward_model(sequences, attention_mask)
+        self.strategy.print('='*30+'reward model finish getting rewards'+30*'=')
 
+        self.strategy.print('='*30+'compute reward'+30*'=')
         reward, kl = compute_reward(
             r,
             self.kl_ctl.value,
@@ -170,6 +195,9 @@ class NaiveExperienceMaker(ABC):
             base_action_log_probs,
             action_mask=action_mask,
         )
+        # self.strategy.print('='*30+'finish compute reward'+30*'=')
+
+        # self.strategy.print('='*30+'get advantages and returns'+30*'=')
         advantage, returns = self.get_advantages_and_returns(
             value,
             reward,
@@ -177,6 +205,7 @@ class NaiveExperienceMaker(ABC):
             generate_kwargs["gamma"],
             generate_kwargs["lambd"],
         )
+        self.strategy.print('='*30+'finish get advantages and returns'+30*'=')
 
         info = {
             "kl": masked_mean(kl, action_mask, dim=-1),
@@ -240,6 +269,7 @@ class NaiveExperienceMaker(ABC):
                 returns.append(ret.squeeze(0))
             return advantages, returns
 
+        # gae, generalized advantage estimation 
         lastgaelam = 0
         advantages_reversed = []
         response_length = rewards.size(1)
@@ -252,6 +282,7 @@ class NaiveExperienceMaker(ABC):
         for t in reversed(range(response_length)):
             nextvalues = values[:, t + 1] if t < response_length - 1 else 0.0
             delta = rewards[:, t] + gamma * nextvalues - values[:, t]
+            # lambd 是 GAE 中的平滑系数，控制优势估计的偏差与方差平衡
             lastgaelam = delta + gamma * lambd * lastgaelam
             advantages_reversed.append(lastgaelam)
         advantages = torch.stack(advantages_reversed[::-1], dim=1)
@@ -513,3 +544,214 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
         "Ensure all experience has been send to critic"
         ray.get(self._ref)
         self._ref = None
+
+class PRMExperienceMaker(NaiveExperienceMaker):
+    @torch.no_grad()
+    def make_experience(self, prompts: Union[str, List[str]], **generate_kwargs) -> Experience:
+        self.actor.eval()
+        self.critic.eval()
+        self.initial_model.eval()
+        if self.reward_model is not None:
+            self.reward_model.eval()
+
+        # generate seq
+        inputs = self.tokenize_fn(prompts, self.prompt_max_len, device="cuda")
+        input_len = inputs['input_ids'].size(1)
+        self.strategy.print('actor use gpu:'+str(next(self.actor.parameters()).is_cuda))
+        self.strategy.print('='*30+'actor start to generate sequences'+30*'=')
+        sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
+        # sequences = sequences[...,:-5]
+        # attention_mask = attention_mask[...,:-5]
+        # action_mask = action_mask[...,:-5]
+        # last_elements = sequences[:, -1]
+        # seq_len = sequences.size(1)
+        # expanded_sequences = torch.cat([sequences, last_elements.unsqueeze(1).expand(sequences.size(0), self.prompt_max_len+input_len - seq_len)], dim=1)
+        # expanded_attention_mask = torch.cat([attention_mask, torch.ones(attention_mask.size(0), self.prompt_max_len - seq_len+input_len, device=attention_mask.device)], dim=1)
+        # expanded_action_mask = torch.cat([action_mask, torch.ones(action_mask.size(0), self.prompt_max_len - seq_len+input_len, device=action_mask.device)], dim=1)
+        # expanded_sequences[...,-1] = 128009
+        # expanded_attention_mask[...,-1] = 1
+        # expanded_action_mask[...,-1] = 1
+        # sequences = expanded_sequences
+        # attention_mask = expanded_attention_mask
+        # action_mask = expanded_action_mask
+        # breakpoint()
+
+        self.strategy.print('='*30+'actor finish generating sequences'+30*'=')
+        num_actions = action_mask.size(1)
+
+
+        # log probs
+        self.strategy.print('='*30+'actor start to get log probs'+30*'=')
+        action_log_probs = self.actor(sequences, num_actions, attention_mask)
+        self.strategy.print('='*30+'actor finish getting log probs'+30*'=')
+
+        # init log probs
+        self.strategy.print('initial model use gpu:'+str(next(self.initial_model.parameters()).is_cuda))
+        # for parameter in self.initial_model.parameters():
+        #     if not parameter.is_cuda:
+        #         self.strategy.print('initial model parameter not on gpu')
+        #         breakpoint()
+        self.strategy.print('='*30+'initial model start to get log probs'+30*'=')
+        base_action_log_probs = self.initial_model(sequences, num_actions, attention_mask)
+        self.strategy.print('='*30+'initial model finish getting log probs'+30*'=')
+
+        # values
+        self.strategy.print('critic use gpu:'+str(next(self.critic.parameters()).is_cuda))
+        self.strategy.print('='*30+'critic start to get values'+30*'=')
+        # value = self.critic(sequences, num_actions, attention_mask)
+        # output = self.critic(sequences, attention_mask=attention_mask)
+        value= self.compute_value_from_sequences(sequences, attention_mask, input_len=input_len, num_actions=num_actions)
+        self.strategy.print('='*30+'critic finish getting values'+30*'=')
+
+        # rewards
+        self.strategy.print('reward model use gpu:'+str(next(self.reward_model.parameters()).is_cuda))
+        self.strategy.print('='*30+'reward model start to get rewards'+30*'=')
+        if self.remote_rm_url is not None:
+            # remote RM
+            queries = self.tokenizer.batch_decode(sequences.cpu(), skip_special_tokens=False)
+            r = remote_rm_fn(self.remote_rm_url, queries=queries).to(device=action_log_probs.device)
+        else:
+            # local RM
+            r = self.compute_reward_from_output(sequences, attention_mask, input_len, num_actions=num_actions)
+        self.strategy.print('='*30+'reward model finish getting rewards'+30*'=')
+        self.strategy.print('='*30+'compute reward'+30*'=')
+        reward, kl = compute_reward(
+            r,
+            self.kl_ctl.value,
+            action_log_probs,
+            base_action_log_probs,
+            action_mask=action_mask,
+        )
+        # self.strategy.print('='*30+'finish compute reward'+30*'=')
+
+        # self.strategy.print('='*30+'get advantages and returns'+30*'=')
+        advantage, returns = self.get_advantages_and_returns(
+            value,
+            reward,
+            action_mask,
+            generate_kwargs["gamma"],
+            generate_kwargs["lambd"],
+        )
+        self.strategy.print('='*30+'finish get advantages and returns'+30*'=')
+
+        info = {
+            "kl": masked_mean(kl, action_mask, dim=-1),
+            "reward": r.mean(dim=-1),
+            "return": reward.sum(dim=-1),
+            "response_length": action_mask.float().sum(dim=-1),
+            "total_length": attention_mask.float().sum(dim=-1),
+        }
+        # reset model state
+        self.actor.train()
+        self.critic.train()
+
+        return Experience(
+            sequences,
+            action_log_probs,
+            value,
+            returns,
+            advantage,
+            attention_mask,
+            action_mask,
+            info,
+        )
+    
+    def compute_value_from_sequences(self, sequences: torch.Tensor, attention_mask: torch.Tensor, input_len: int, num_actions: int, return_output:bool=False):
+        step_separater = '\n'
+        km_token = 'ки'
+        km_token_id = 1107
+        # +
+        good_token_id = 648
+        # -
+        bad_token_id = 387
+        candidate_tokens = [good_token_id, bad_token_id]
+        # \n 
+        newline_id = 13
+
+        origin_seq_len = sequences.size(1)
+
+        decoded_sequences = self.tokenizer.batch_decode(sequences.cpu(), clean_up_tokenization_spaces=False)
+        decoded_sequences = [seq.replace(step_separater, km_token) for seq in decoded_sequences]
+        # reencoded_sequences = self.tokenizer.batch_encode_plus(
+        #     decoded_sequences, 
+        #     return_tensors='pt', 
+        #     padding=False, 
+        #     add_special_tokens=False
+        # )
+        reencoded_inputs = self.tokenize_fn(decoded_sequences, self.prompt_max_len, device='cuda', tokenizer=self.critic_tokenizer)
+        reencoded_sequences = reencoded_inputs['input_ids']
+        attention_mask = reencoded_inputs['attention_mask']
+
+
+        logits = self.critic(reencoded_sequences, attention_mask=attention_mask, num_actions=num_actions)
+        logits = logits[..., candidate_tokens]
+        values = logits.softmax(dim=-1)[:,:,0]
+
+        values_len = values.size(1)
+        # if values.size(1) < num_actions:
+        #     # TODO: 全设为0名？
+        #     new_values = torch.zeros(values.size(0), num_actions, device=values.device)
+        #     new_values[:, :values.size(1)] = values
+        #     values = new_values
+        # else:
+        if values_len < num_actions:
+            new_values = torch.zeros(values.size(0), num_actions, device=values.device)
+            new_values[:, :values_len] = values
+            values = new_values
+        else:
+            values = values[:, -num_actions:]
+        
+
+        # compute_reward 中reward被限制在这个数量级
+        # values = values.clamp(min=-10, max=10)
+        if return_output:
+            return torch.tensor(values, device=sequences.device, requires_grad=True), None
+        else:
+            return torch.tensor(values, device=sequences.device, requires_grad=True)
+
+    def compute_reward_from_output(self, sequences: torch.Tensor, attention_mask: torch.Tensor, input_len: int, num_actions: int):
+        step_separater = '\n'
+        km_token = 'ки'
+        km_token_id = 1107
+        # +
+        good_token_id = 648
+        # -
+        bad_token_id = 387
+        candidate_tokens = [good_token_id, bad_token_id]
+        # \n 
+        newline_id = 13
+
+        decoded_sequences = self.tokenizer.batch_decode(sequences.cpu(), clean_up_tokenization_spaces=False)
+        decoded_sequences = [seq.replace(step_separater, km_token) for seq in decoded_sequences]
+        reencoded_inputs = self.tokenize_fn(decoded_sequences, self.prompt_max_len, device='cuda', tokenizer=self.critic_tokenizer)
+
+        sequences = reencoded_inputs['input_ids']
+        attention_mask = reencoded_inputs['attention_mask']
+        # eos_token_id, pad_token_id = self.tokenizer.eos_token_id, self.tokenizer.pad_token_id
+
+        # attention_mask = (sequences.ne(eos_token_id) & sequences.ne(pad_token_id)).to(dtype=torch.long)
+        # seq_length = attention_mask.size(1)
+        # eos_indices = seq_length - attention_mask.long().fliplr().argmax(dim=1, keepdim=True).clamp(min=1)
+        # sequences.scatter_(dim=1, index=eos_indices, value=eos_token_id)
+
+        # # For Llama3 and Qwen2 models, there are some eos_tokens in the middle of the prompt.
+        # first_token_indices = attention_mask.long().argmax(dim=1, keepdim=True)
+        # mask = torch.arange(seq_length).unsqueeze(0).expand(sequences.size(0), -1).to(device=sequences.device)
+        # attention_mask = (mask >= first_token_indices) & (mask <= eos_indices).to(dtype=torch.long)
+
+        # # in RL, state_i (current token) + action_i (next token) -> state_i+1 (next token)
+        # state_seq = sequences[:, input_len - 1 : -1]
+        # action_mask = state_seq.ne(eos_token_id) & state_seq.ne(pad_token_id)
+        # action_mask[:, 0] = 1
+
+        
+        logits = self.reward_model(sequences, attention_mask=attention_mask)
+        logits = logits[..., candidate_tokens]
+        scores = logits.softmax(dim=-1)[:,:,0]
+        
+        rewards = torch.zeros_like(scores)
+        mask = sequences == km_token_id
+        rewards[mask] = scores[mask]
+        # rewards = rewards[:, -1]
+
+        return rewards[..., -num_actions:]
