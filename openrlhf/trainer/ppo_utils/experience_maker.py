@@ -559,7 +559,9 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         input_len = inputs['input_ids'].size(1)
         self.strategy.print('actor use gpu:'+str(next(self.actor.parameters()).is_cuda))
         self.strategy.print('='*30+'actor start to generate sequences'+30*'=')
+        # sequences = prompt+answer
         sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
+
         # sequences = sequences[...,:-5]
         # attention_mask = attention_mask[...,:-5]
         # action_mask = action_mask[...,:-5]
@@ -582,6 +584,7 @@ class PRMExperienceMaker(NaiveExperienceMaker):
 
         # log probs
         self.strategy.print('='*30+'actor start to get log probs'+30*'=')
+        # 这取出来的只有answer部分(num_actions长度)
         action_log_probs = self.actor(sequences, num_actions, attention_mask)
         self.strategy.print('='*30+'actor finish getting log probs'+30*'=')
 
@@ -748,10 +751,17 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         logits = self.reward_model(sequences, attention_mask=attention_mask)
         logits = logits[..., candidate_tokens]
         scores = logits.softmax(dim=-1)[:,:,0]
+        scores_len = scores.size(1)
+        if scores_len < num_actions:
+            new_scores = torch.zeros(scores.size(0), num_actions, device=scores.device)
+            new_scores[:, :scores_len] = scores
+            scores = new_scores
+        else:
+            scores = scores[:, -num_actions:]
         
+
         rewards = torch.zeros_like(scores)
         mask = sequences == km_token_id
         rewards[mask] = scores[mask]
-        # rewards = rewards[:, -1]
 
-        return rewards[..., -num_actions:]
+        return rewards
