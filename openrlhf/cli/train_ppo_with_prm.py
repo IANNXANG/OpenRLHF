@@ -403,6 +403,7 @@ if __name__ == "__main__":
     parser.add_argument("--wandb_org", type=str, default=None)
     parser.add_argument("--wandb_group", type=str, default=None)
     parser.add_argument("--wandb_project", type=str, default="openrlhf_train_ppo")
+    parser.add_argument("--wandb_relogin", type=bool, default=False)
     parser.add_argument(
         "--wandb_run_name",
         type=str,
