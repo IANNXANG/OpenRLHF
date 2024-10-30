@@ -765,9 +765,9 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         # action_mask[:, 0] = 1
 
         
-        # logits = self.reward_model(reencoded_sequences, attention_mask=reencoded_attention_mask)
-        # logits = logits[..., candidate_tokens]
-        # scores = logits.softmax(dim=-1)[:,:,0]
+        logits = self.reward_model(reencoded_sequences, attention_mask=reencoded_attention_mask)
+        logits = logits[..., candidate_tokens]
+        scores = logits.softmax(dim=-1)[:,:,0]
 
         # rewards = torch.zeros_like(sequences)
         # sep_mask = sequences == step_separater_id
@@ -776,17 +776,19 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         # rewards[sep_mask] = scores[km_mask]
         # 找到原来
 
-        scores_len = scores.size(1)
-        if scores_len < num_actions:
-            new_scores = torch.zeros(scores.size(0), num_actions, device=scores.device)
-            new_scores[:, :scores_len] = scores
-            scores = new_scores
-        else:
-            scores = scores[:, -num_actions:]
+        
         
 
-        rewards = torch.zeros_like(scores)
-        mask = sequences == km_token_id
+        rewards = torch.zeros_like(scores, device=scores.device)
+        mask = reencoded_sequences == km_token_id
         rewards[mask] = scores[mask]
+
+        rewards_len = rewards.size(1)
+        if rewards_len < num_actions:
+            new_rewards = torch.zeros(rewards.size(0), num_actions, device=rewards.device)
+            new_rewards[:, :rewards_len] = rewards
+            rewards = new_rewards
+        else:
+            rewards = rewards[:, -num_actions:]
 
         return rewards
