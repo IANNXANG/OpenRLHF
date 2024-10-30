@@ -663,13 +663,20 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         step_separater = '\n'
         km_token = 'ки'
         km_token_id = 1107
+        # 12902
+        # km_token_id = self.critic_tokenizer.encode(km_token, add_special_tokens=False)[0]
         # +
         good_token_id = 648
+        good_token_id = self.critic_tokenizer.encode('+', add_special_tokens=False)[0]
         # -
         bad_token_id = 387
+        bad_token_id = self.critic_tokenizer.encode('-', add_special_tokens=False)[0]
         candidate_tokens = [good_token_id, bad_token_id]
         # \n 
-        newline_id = 13
+        step_separater_id = 13
+        # 198
+        step_separater_id = 198
+        # step_separater_id = self.tokenizer.encode(step_separater, add_special_tokens=False)[0]
 
         origin_seq_len = sequences.size(1)
 
@@ -683,26 +690,31 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         # )
         reencoded_inputs = self.tokenize_fn(decoded_sequences, self.prompt_max_len, device='cuda', tokenizer=self.critic_tokenizer)
         reencoded_sequences = reencoded_inputs['input_ids']
-        attention_mask = reencoded_inputs['attention_mask']
+        reencoded_attention_mask = reencoded_inputs['attention_mask']
 
 
-        logits = self.critic(reencoded_sequences, attention_mask=attention_mask, num_actions=num_actions)
+        logits = self.critic(reencoded_sequences, attention_mask=reencoded_attention_mask, num_actions=num_actions)
         logits = logits[..., candidate_tokens]
-        values = logits.softmax(dim=-1)[:,:,0]
 
-        values_len = values.size(1)
+        scores = logits.softmax(dim=-1)[:,:,0]
+
+        # values = torch.zeros_like(sequences)
+        # sep_mask = sequences == step_separater_id
+        # km_mask = reencoded_sequences == km_token_id
+        # values[sep_mask] = scores[km_mask]
+
+        scores_len = scores.size(1)
         # if values.size(1) < num_actions:
         #     # TODO: 全设为0名？
         #     new_values = torch.zeros(values.size(0), num_actions, device=values.device)
         #     new_values[:, :values.size(1)] = values
         #     values = new_values
         # else:
-        if values_len < num_actions:
-            new_values = torch.zeros(values.size(0), num_actions, device=values.device)
-            new_values[:, :values_len] = values
-            values = new_values
+        if scores_len < num_actions:
+            values = torch.zeros(scores.size(0), num_actions, device=values.device)
+            values[:, :scores_len] = scores
         else:
-            values = values[:, -num_actions:]
+            values = scores[:, -num_actions:]
         
 
         # compute_reward 中reward被限制在这个数量级
@@ -716,20 +728,25 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         step_separater = '\n'
         km_token = 'ки'
         km_token_id = 1107
+        km_token_id = self.critic_tokenizer.encode(km_token, add_special_tokens=False)[0]
+        
         # +
         good_token_id = 648
+        good_token_id = self.critic_tokenizer.encode('+', add_special_tokens=False)[0]
         # -
         bad_token_id = 387
+        bad_token_id = self.critic_tokenizer.encode('-', add_special_tokens=False)[0]
         candidate_tokens = [good_token_id, bad_token_id]
         # \n 
-        newline_id = 13
+        step_separater_id = 13
+        step_separater_id = self.tokenizer.encode(step_separater, add_special_tokens=False)[0]
 
         decoded_sequences = self.tokenizer.batch_decode(sequences.cpu(), clean_up_tokenization_spaces=False)
         decoded_sequences = [seq.replace(step_separater, km_token) for seq in decoded_sequences]
         reencoded_inputs = self.tokenize_fn(decoded_sequences, self.prompt_max_len, device='cuda', tokenizer=self.critic_tokenizer)
 
-        sequences = reencoded_inputs['input_ids']
-        attention_mask = reencoded_inputs['attention_mask']
+        reencoded_sequences = reencoded_inputs['input_ids']
+        reencoded_attention_mask = reencoded_inputs['attention_mask']
         # eos_token_id, pad_token_id = self.tokenizer.eos_token_id, self.tokenizer.pad_token_id
 
         # attention_mask = (sequences.ne(eos_token_id) & sequences.ne(pad_token_id)).to(dtype=torch.long)
@@ -748,9 +765,17 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         # action_mask[:, 0] = 1
 
         
-        logits = self.reward_model(sequences, attention_mask=attention_mask)
-        logits = logits[..., candidate_tokens]
-        scores = logits.softmax(dim=-1)[:,:,0]
+        # logits = self.reward_model(reencoded_sequences, attention_mask=reencoded_attention_mask)
+        # logits = logits[..., candidate_tokens]
+        # scores = logits.softmax(dim=-1)[:,:,0]
+
+        # rewards = torch.zeros_like(sequences)
+        # sep_mask = sequences == step_separater_id
+        # km_mask = reencoded_inputs == km_token_id
+
+        # rewards[sep_mask] = scores[km_mask]
+        # 找到原来
+
         scores_len = scores.size(1)
         if scores_len < num_actions:
             new_scores = torch.zeros(scores.size(0), num_actions, device=scores.device)
