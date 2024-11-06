@@ -412,6 +412,8 @@ class PPOTrainer(ABC):
                 status[k] = (
                     (v * experience.info["response_length"]).sum() / experience.info["response_length"].sum()
                 ).item()
+            # elif k in ['token_reward', 'token_value']:
+            #     status[k] = v
             else:
                 status[k] = v.mean().item()
         return status
@@ -455,15 +457,12 @@ class PPOTrainer(ABC):
                 packed_seq_lens=packed_seq_lens,
             )
         # loss function
-        try:
-            critic_loss = self.critic_loss_fn(
-                values,
-                old_values,
-                returns,
-                action_mask=experience.action_mask,
-            )
-        except:
-            breakpoint()
+        critic_loss = self.critic_loss_fn(
+            values,
+            old_values,
+            returns,
+            action_mask=experience.action_mask,
+        )
         # mixtral
         if self.aux_loss:
             aux_loss = output.aux_loss
@@ -492,6 +491,7 @@ class PPOTrainer(ABC):
                         "global_step": global_step,
                     }.items()
                 }
+                # self._wandb.Table(columns=['step', 'token_reward', 'token_value']).add_data(global_step, str(logs_dict['token_reward']), str(logs_dict['token_value']))
                 self._wandb.log(logs)
             # TensorBoard
             elif self._tensorboard is not None and self.strategy.is_rank_0():

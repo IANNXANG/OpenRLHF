@@ -70,6 +70,9 @@ def split_experience_batch(experience: Experience) -> List[BufferItem]:
         assert batch_size == len(vals)
         for i, vv in enumerate(vals):
             if isinstance(vv, torch.Tensor):
+                # if k in ['token_reward', 'token_value']:
+                #     vv = vv.tolist()
+                # else:
                 # numel 返回元素个数
                 assert vv.numel() == 1, f"info[{k}] must be a scalar tensor, but got {vv.shape}"
                 # item() 返回一个标量值

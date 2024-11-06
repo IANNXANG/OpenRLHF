@@ -310,7 +310,10 @@ def _get_critic_model(base_pretrained_model, base_llm_model, value_head_prefix="
                 return outputs
 
             if not self.packing_samples:
-                action_values = values[:, -num_actions:]
+                if num_actions != -1:
+                    action_values = values[:, -num_actions:]
+                else:
+                    action_values = values
             else:
                 assert isinstance(num_actions, list) and len(num_actions) == len(packed_seq_lens)
                 action_values = []

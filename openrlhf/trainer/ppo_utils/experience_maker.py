@@ -4,6 +4,7 @@ from abc import ABC
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
+import re
 
 import ray
 import torch
@@ -11,7 +12,7 @@ import torch.nn as nn
 from tqdm import tqdm
 
 from openrlhf.models.actor import Actor
-from openrlhf.models.utils import compute_reward, masked_mean, unpacking_samples
+from openrlhf.models.utils import compute_reward, masked_mean, unpacking_samples, masked_sum
 from openrlhf.utils.logging_utils import init_logger
 from openrlhf.utils.remote_rm_utils import remote_rm_fn, remote_rm_fn_ray
 
@@ -615,9 +616,10 @@ class PRMExperienceMaker(NaiveExperienceMaker):
             r = remote_rm_fn(self.remote_rm_url, queries=queries).to(device=action_log_probs.device)
         else:
             # local RM
-            r = self.compute_reward_from_output(sequences, attention_mask, input_len, num_actions=num_actions)
+            r, step_mask = self.compute_reward_from_output(sequences, attention_mask, input_len, num_actions=num_actions)
         self.strategy.print('='*30+'reward model finish getting rewards'+30*'=')
         self.strategy.print('='*30+'compute reward'+30*'=')
+        # breakpoint()
         reward, kl = compute_reward(
             r,
             self.kl_ctl.value,
@@ -639,8 +641,12 @@ class PRMExperienceMaker(NaiveExperienceMaker):
 
         info = {
             "kl": masked_mean(kl, action_mask, dim=-1),
-            "reward": r.mean(dim=-1),
-            "return": reward.sum(dim=-1),
+            # "reward": r.mean(dim=-1),
+            "reward": masked_mean(r, step_mask, dim=-1),
+            # "token_reward": r,
+            # "token_value": value,
+            # "return": reward.sum(dim=-1),
+            "return": masked_sum(reward, step_mask, dim=-1),
             "response_length": action_mask.float().sum(dim=-1),
             "total_length": attention_mask.float().sum(dim=-1),
         }
@@ -659,18 +665,38 @@ class PRMExperienceMaker(NaiveExperienceMaker):
             info,
         )
     
+    def process_text(self, text: str)->str:
+        text = text.replace('\r\n', '\n').replace('\n', 'ки')
+        # text = re.sub(r'\n\s+\n', '\n', text)
+        # km  km km 这种情况多换几次
+
+        text = re.sub(r'ки\s+ки', 'ки', text)
+        text = re.sub(r'ки\s+ки', 'ки', text)
+        text = re.sub(r'ки\s+ки', 'ки', text)
+        return text
+
+    def find_first_matching_char(self, s: str)->int:
+        # 使用集合提高查找效率
+        allowed_chars = {'Ċ'}
+        # 遍历字符串并检查每个字符
+        for i, char in enumerate(s):
+            if char in allowed_chars:
+                return i
+        return len(s)
+
     def compute_value_from_sequences(self, sequences: torch.Tensor, attention_mask: torch.Tensor, input_len: int, num_actions: int, return_output:bool=False):
         step_separater = '\n'
         km_token = 'ки'
-        km_token_id = 1107
+        km_token_id1 = 1107
+        km_token_id2 = 12902
         # 12902
         # km_token_id = self.critic_tokenizer.encode(km_token, add_special_tokens=False)[0]
         # +
         good_token_id = 648
-        good_token_id = self.critic_tokenizer.encode('+', add_special_tokens=False)[0]
+        # good_token_id = self.critic_tokenizer.encode('+', add_special_tokens=False)[0]
         # -
         bad_token_id = 387
-        bad_token_id = self.critic_tokenizer.encode('-', add_special_tokens=False)[0]
+        # bad_token_id = self.critic_tokenizer.encode('-', add_special_tokens=False)[0]
         candidate_tokens = [good_token_id, bad_token_id]
         # \n 
         step_separater_id = 13
@@ -680,70 +706,173 @@ class PRMExperienceMaker(NaiveExperienceMaker):
 
         origin_seq_len = sequences.size(1)
 
-        decoded_sequences = self.tokenizer.batch_decode(sequences.cpu(), clean_up_tokenization_spaces=False)
-        decoded_sequences = [seq.replace(step_separater, km_token) for seq in decoded_sequences]
+        decoded_sequences = self.tokenizer.batch_decode(sequences, clean_up_tokenization_spaces=False)
+        # decoded_sequences = [seq.replace(step_separater, km_token) for seq in decoded_sequences]
+        # 处理ки   ки
+        # decoded_sequences = [re.sub(r'ки\s+ки', 'ки ', seq) for seq in decoded_sequences]
+        origin_decoded_sequences = decoded_sequences
+        decoded_sequences = [self.process_text(seq) for seq in decoded_sequences]
+
         # reencoded_sequences = self.tokenizer.batch_encode_plus(
         #     decoded_sequences, 
         #     return_tensors='pt', 
         #     padding=False, 
         #     add_special_tokens=False
         # )
-        reencoded_inputs = self.tokenize_fn(decoded_sequences, self.prompt_max_len, device='cuda', tokenizer=self.critic_tokenizer)
+        reencoded_inputs = self.tokenize_fn(decoded_sequences, self.prompt_max_len*10, device='cuda', tokenizer=self.critic_tokenizer)
         reencoded_sequences = reencoded_inputs['input_ids']
         reencoded_attention_mask = reencoded_inputs['attention_mask']
 
 
-        logits = self.critic(reencoded_sequences, attention_mask=reencoded_attention_mask, num_actions=num_actions)
+        logits = self.critic(reencoded_sequences, attention_mask=reencoded_attention_mask, num_actions=-1)
         logits = logits[..., candidate_tokens]
 
         scores = logits.softmax(dim=-1)[:,:,0]
 
-        # values = torch.zeros_like(sequences)
-        # sep_mask = sequences == step_separater_id
-        # km_mask = reencoded_sequences == km_token_id
-        # values[sep_mask] = scores[km_mask]
+        # mask_1 = scores > 0.7
+        # scores[mask_1] = 1
+        # scores[~mask_1] = -1
+        # scores = mask_1.float()*1.0 + (~mask_1).float()*(-1.0)
+        scores = scores*2-1
+        # scores.requires_grad = True
+        # scores_1m1 = torch.where(scores > 0.7, torch.ones_like(scores, device=scores.device), torch.full_like(scores, -1.0, device=scores.device))
+        
+        values = torch.zeros_like(sequences, dtype=scores.dtype, device=scores.device)
+        # tokens = self.tokenizer.convert_ids_to_tokens(reencoded_sequences[0].tolist())
+        sep_mask = torch.zeros_like(sequences, dtype=torch.bool)
+        # 批量转换 token IDs 为 tokens
+        batch_tokens = [self.tokenizer.convert_ids_to_tokens(ids.tolist()) for ids in sequences]
+        # 更新 mask，若 token 中包含 '\n' 或 '.Ċ' 则将对应位置的 mask 设为 True
+        
 
-        scores_len = scores.size(1)
+        
+        
+        for i, tokens in enumerate(batch_tokens):
+            # last_token = None
+            # last_last_token = None
+            tokens_pre = [None, None]
+            for j, token in enumerate(tokens):
+                # if token is None:
+                #     with open('why_none.txt', 'w') as f:
+                #         f.write(str(tokens)+'\n')
+                #     breakpoint()
+                if token is not None and (('\n' in token) or ('Ċ' in token)):
+                    # if (last_token is None) or not sep_mask[i,j-1] or (last_token[-1]=='\n' or last_token[-1]=='Ċ') and (token[0]!='\n' or token[0]!='Ċ'):
+                    last_token = tokens_pre[1]
+                    last_last_token = tokens_pre[0]
+                    if (last_token is None) or (not sep_mask[i,j-1]) or ((token[0]!='\n' or token[0]!='Ċ') and not (bool(re.match(r'^[ĠĊĉč]*$', token)))):
+                        sep_mask[i, j] = True
+                    if last_last_token is not None:
+                        # last_last_token_reverse = last_last_token[::-1]
+                        # 从右往左最后一个为空白的字符位置
+                        # last_last_token_len = len(last_last_token_reverse)
+                        last_last_token_first_non_matching_char_idx = self.find_first_matching_char(last_last_token)
+                        # 从左往右最后一个为空白的字符位置
+                        this_token_reverse = token[::-1]
+                        this_token_reverse_first_non_matching_char_idx = self.find_first_matching_char(this_token_reverse)
+                        slice_last_last_token = last_last_token[last_last_token_first_non_matching_char_idx+1:]
+                        slice_this_token = this_token_reverse[this_token_reverse_first_non_matching_char_idx+1:][::-1]
+                        if sep_mask[i, j-2] and bool(re.match(r'^[ĠĉčĊ]*$',slice_last_last_token+last_token+slice_this_token)):
+                            sep_mask[i, j] = False
+                tokens_pre = [tokens_pre[1], token]
+
+        origin_sep_mask = sep_mask.clone()
+        # sep_mask = sep_mask & ~torch.cat([torch.zeros(sep_mask.shape[0], 1, dtype=torch.bool, device=sep_mask.device), sep_mask[:, :-1]], dim=1)
+
+        # sep_mask = sequences == step_separater_id
+        km_mask = (reencoded_sequences == km_token_id1) | (reencoded_sequences == km_token_id2)
+        # 连续的km 只保留第一个
+        # km_mask = km_mask & ~km_mask.roll(1, 1)
+        km_mask = km_mask & ~torch.cat([torch.zeros(km_mask.shape[0], 1, dtype=torch.bool, device=km_mask.device), km_mask[:, :-1]], dim=1)
+        if km_mask.sum().item() != sep_mask.sum().item():
+            with open('error.txt', 'w') as f:
+                f.write('\n'+'='*100+'\n')
+                f.write(f'km_mask: {km_mask.sum().item()}; sep_mask: {sep_mask.sum().item()}\n')
+                f.write(f'km_mask shape: {km_mask.shape}; sep_mask shape: {sep_mask.shape}\n')
+                f.write(f'origin km_mask: {((reencoded_sequences == km_token_id1) | (reencoded_sequences == km_token_id2)).sum().item()}; ')
+                f.write(f'origin sep_mask: {origin_sep_mask.sum().item()}\n')
+                for i, tokens in enumerate(batch_tokens):
+                    for j in range(len(tokens)):
+                        newline_token = ('\n' in tokens[j]) or ('Ċ' in tokens[j])
+                        f.write(f'({i},{j}): {tokens[j]}; ac{newline_token}\n')
+                    # f.write('\n'.join(tokens))
+                    f.write('\n')
+                # f.write(str(reencoded_sequences.tolist()))
+                f.write('\n')
+                critic_batch_tokens = [self.critic_tokenizer.convert_ids_to_tokens(ids.tolist()) for ids in reencoded_sequences]
+                for i, tokens in enumerate(critic_batch_tokens):
+                    for j in range(len(tokens)):
+                        f.write(f'({i},{j}): {tokens[j]}; {reencoded_sequences[i][j]}\n')
+                    # f.write('\n'.join(tokens))
+                    f.write('\n')
+                # f.write
+                f.write(str(decoded_sequences)+'\n')
+                f.write(str(origin_decoded_sequences))
+            breakpoint()
+        # values = values.clone()  # Create a clone if values need to maintain gradient tracking
+        # values = torch.where(sep_mask, scores[km_mask].view(-1), values)
+        # values[sep_mask] = scores[km_mask]
+        
+        selected_scores = torch.masked_select(scores, km_mask)
+
+        # values_temp = values.clone() 
+        
+        values.masked_scatter_(sep_mask, selected_scores)
+        # values = values_temp
+
+        # values = scores.clone()
+        # values = torch.tensor(scores, requires_grad=True)
+
+        if values.size(1) > num_actions:
+            values = values[:, -num_actions:]
+
+        # scores_len = scores.size(1)
         # if values.size(1) < num_actions:
         #     # TODO: 全设为0名？
         #     new_values = torch.zeros(values.size(0), num_actions, device=values.device)
         #     new_values[:, :values.size(1)] = values
         #     values = new_values
         # else:
-        if scores_len < num_actions:
-            values = torch.zeros(scores.size(0), num_actions, device=values.device)
-            values[:, :scores_len] = scores
-        else:
-            values = scores[:, -num_actions:]
+        # if scores_len < num_actions:
+        #     values = torch.zeros(scores.size(0), num_actions)
+        #     values[:, :scores_len] = scores
+        # else:
+        #     values = scores[:, -num_actions:]
         
 
         # compute_reward 中reward被限制在这个数量级
         # values = values.clamp(min=-10, max=10)
         if return_output:
-            return torch.tensor(values, device=sequences.device, requires_grad=True), None
+            return values, None
         else:
-            return torch.tensor(values, device=sequences.device, requires_grad=True)
+            return values
 
     def compute_reward_from_output(self, sequences: torch.Tensor, attention_mask: torch.Tensor, input_len: int, num_actions: int):
         step_separater = '\n'
         km_token = 'ки'
-        km_token_id = 1107
-        km_token_id = self.critic_tokenizer.encode(km_token, add_special_tokens=False)[0]
+        # 12902
+        km_token_id1 = 1107
+        km_token_id2 = 12902
+        # km_token_id = self.critic_tokenizer.encode(km_token, add_special_tokens=False)[0]
         
         # +
         good_token_id = 648
-        good_token_id = self.critic_tokenizer.encode('+', add_special_tokens=False)[0]
+        # good_token_id = self.critic_tokenizer.encode('+', add_special_tokens=False)[0]
         # -
         bad_token_id = 387
-        bad_token_id = self.critic_tokenizer.encode('-', add_special_tokens=False)[0]
+        # bad_token_id = self.critic_tokenizer.encode('-', add_special_tokens=False)[0]
         candidate_tokens = [good_token_id, bad_token_id]
         # \n 
         step_separater_id = 13
         step_separater_id = self.tokenizer.encode(step_separater, add_special_tokens=False)[0]
 
-        decoded_sequences = self.tokenizer.batch_decode(sequences.cpu(), clean_up_tokenization_spaces=False)
-        decoded_sequences = [seq.replace(step_separater, km_token) for seq in decoded_sequences]
-        reencoded_inputs = self.tokenize_fn(decoded_sequences, self.prompt_max_len, device='cuda', tokenizer=self.critic_tokenizer)
+        decoded_sequences = self.tokenizer.batch_decode(sequences, clean_up_tokenization_spaces=False)
+        # decoded_sequences = [seq.replace(step_separater, km_token) for seq in decoded_sequences]
+        # 处理ки   ки
+        # decoded_sequences = [re.sub(r'ки\s+ки', 'ки ', seq) for seq in decoded_sequences]
+        decoded_sequences = [self.process_text(seq) for seq in decoded_sequences]
+
+        reencoded_inputs = self.tokenize_fn(decoded_sequences, self.prompt_max_len*10, device='cuda', tokenizer=self.critic_tokenizer)
 
         reencoded_sequences = reencoded_inputs['input_ids']
         reencoded_attention_mask = reencoded_inputs['attention_mask']
@@ -768,27 +897,106 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         logits = self.reward_model(reencoded_sequences, attention_mask=reencoded_attention_mask)
         logits = logits[..., candidate_tokens]
         scores = logits.softmax(dim=-1)[:,:,0]
+        # mask_1 = scores > 0.7
+        # scores[mask_1] = 1
+        # scores[~mask_1] = -1
+        # scores = torch.where(scores > 0.7, torch.tensor(1.0, device=scores.device), torch.tensor(-1.0, device=scores.device))
+        scores = scores*2-1
 
         # rewards = torch.zeros_like(sequences)
+        tokens = self.tokenizer.convert_ids_to_tokens(reencoded_sequences[0].tolist())
+        sep_mask = torch.zeros_like(sequences, dtype=torch.bool)
+        # 批量转换 token IDs 为 tokens
+        batch_tokens = [self.tokenizer.convert_ids_to_tokens(ids.tolist()) for ids in sequences]
+
+        # 更新 mask，若 token 中包含 '\n' 或 '.Ċ' 则将对应位置的 mask 设为 True
+        for i, tokens in enumerate(batch_tokens):
+            tokens_pre = [None, None]
+            for j, token in enumerate(tokens):
+                # if token is None:
+                #     with open('why_none.txt', 'w') as f:
+                #         f.write(str(tokens)+'\n')
+                #     breakpoint()
+                if token is not None and (('\n' in token) or ('Ċ' in token)):
+                    # if (last_token is None) or not sep_mask[i,j-1] or (last_token[-1]=='\n' or last_token[-1]=='Ċ') and (token[0]!='\n' or token[0]!='Ċ'):
+                    last_token = tokens_pre[1]
+                    last_last_token = tokens_pre[0]
+                    if (last_token is None) or (not sep_mask[i,j-1]) or ((token[0]!='\n' or token[0]!='Ċ') and not (bool(re.match(r'^[ĠĊĉč]*$', token)))):
+                        sep_mask[i, j] = True
+                    if last_last_token is not None:
+                        # last_last_token_reverse = last_last_token[::-1]
+                        # 从右往左最后一个为空白的字符位置
+                        # last_last_token_len = len(last_last_token_reverse)
+                        last_last_token_first_non_matching_char_idx = self.find_first_matching_char(last_last_token)
+                        # 从左往右最后一个为空白的字符位置
+                        this_token_reverse = token[::-1]
+                        this_token_reverse_first_non_matching_char_idx = self.find_first_matching_char(this_token_reverse)
+                        slice_last_last_token = last_last_token[last_last_token_first_non_matching_char_idx+1:]
+                        slice_this_token = this_token_reverse[this_token_reverse_first_non_matching_char_idx+1:][::-1]
+                        if sep_mask[i, j-2] and bool(re.match(r'^[ĠĉčĊ]*$',slice_last_last_token+last_token+slice_this_token)):
+                            sep_mask[i, j] = False
+                tokens_pre = [tokens_pre[1], token]
+        origin_sep_mask = sep_mask.clone()
+        # sep_mask = sep_mask & ~torch.cat([torch.zeros(sep_mask.shape[0], 1, dtype=torch.bool, device=sep_mask.device), sep_mask[:, :-1]], dim=1)
         # sep_mask = sequences == step_separater_id
-        # km_mask = reencoded_inputs == km_token_id
+        rewards = torch.zeros_like(sequences, device=scores.device, dtype=scores.dtype)
 
-        # rewards[sep_mask] = scores[km_mask]
+        km_mask = (reencoded_sequences == km_token_id1) | (reencoded_sequences == km_token_id2)
+        km_mask = km_mask & ~torch.cat([torch.zeros(km_mask.shape[0], 1, dtype=torch.bool, device=km_mask.device), km_mask[:, :-1]], dim=1)
+       
+        if km_mask.sum().item() != sep_mask.sum().item():
+            with open('error.txt', 'w') as f:
+                f.write('\n'+'='*100+'\n')
+                f.write(f'km_mask: {km_mask.sum().item()}; sep_mask: {sep_mask.sum().item()}\n')
+                f.write(f'km_mask shape: {km_mask.shape}; sep_mask shape: {sep_mask.shape}\n')
+                f.write(f'origin km_mask: {((reencoded_sequences == km_token_id1) | (reencoded_sequences == km_token_id2)).sum().item()}; ')
+                f.write(f'origin sep_mask: {origin_sep_mask.sum().item()}\n')
+                for i, tokens in enumerate(batch_tokens):
+                    for j in range(len(tokens)):
+                        newline_token = ('\n' in tokens[j]) or ('Ċ' in tokens[j])
+                        f.write(f'({i},{j}): {tokens[j]}; ac{newline_token}\n')
+                    # f.write('\n'.join(tokens))
+                    f.write('\n')
+                # f.write(str(reencoded_sequences.tolist()))
+                f.write('\n')
+                critic_batch_tokens = [self.critic_tokenizer.convert_ids_to_tokens(ids.tolist()) for ids in reencoded_sequences]
+                for i, tokens in enumerate(critic_batch_tokens):
+                    for j in range(len(tokens)):
+                        f.write(f'({i},{j}): {tokens[j]}; {reencoded_sequences[i][j]}\n')
+                    # f.write('\n'.join(tokens))
+                    f.write('\n')
+                # f.write
+                f.write(str(decoded_sequences))
+            breakpoint()
+        
+        # 验证 km token 对应到 换行token了
+        with open('valid_token_map.txt', 'a') as f:
+            f.write('\n'+'='*100+'\n')
+            critic_batch_tokens = [self.critic_tokenizer.convert_ids_to_tokens(ids.tolist()) for ids in reencoded_sequences]
+            # 获取为 True 的元素的索引
+            sep_rows, sep_cols = torch.nonzero(sep_mask, as_tuple=True)
+            km_rows, km_cols = torch.nonzero(km_mask, as_tuple=True)
+            for i in range(len(sep_rows)):
+                sep_r, sep_c = sep_rows[i], sep_cols[i]
+                km_r, km_c = km_rows[i], km_cols[i]
+                # 输出附近的tokens
+                f.write(f'{i}: sep({sep_r}, {sep_c}): {batch_tokens[sep_r][sep_c-3:sep_c+3]};\n\tkm({km_r}, {km_c}): {critic_batch_tokens[km_r][km_c-3:km_c+3]};\n\tscore: {scores[km_r][km_c]}\n')
+            
+
+        rewards[sep_mask] = scores[km_mask]
         # 找到原来
+        # rewards = torch.zeros_like(scores, device=scores.device)
+        # mask = reencoded_sequences == km_token_id
+        # rewards[mask] = scores[mask]
 
-        
-        
-
-        rewards = torch.zeros_like(scores, device=scores.device)
-        mask = reencoded_sequences == km_token_id
-        rewards[mask] = scores[mask]
-
-        rewards_len = rewards.size(1)
-        if rewards_len < num_actions:
-            new_rewards = torch.zeros(rewards.size(0), num_actions, device=rewards.device)
-            new_rewards[:, :rewards_len] = rewards
-            rewards = new_rewards
-        else:
+        # rewards_len = rewards.size(1)
+        # if rewards_len < num_actions:
+        #     new_rewards = torch.zeros(rewards.size(0), num_actions, device=rewards.device)
+        #     new_rewards[:, :rewards_len] = rewards
+        #     rewards = new_rewards
+        # else:
+        #     rewards = rewards[:, -num_actions:]
+        if rewards.size(1) > num_actions:
             rewards = rewards[:, -num_actions:]
-
-        return rewards
+            sep_mask = sep_mask[:, -num_actions:]
+        return rewards, sep_mask
