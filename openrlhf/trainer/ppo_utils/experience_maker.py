@@ -54,6 +54,8 @@ class Experience:
     values: torch.Tensor
     returns: torch.Tensor
     advantages: torch.Tensor
+    # km_join_p_responses: #list[str]
+    # split_actor_lens: torch.Tensor#list[list[int]]
     attention_mask: Optional[torch.LongTensor]
     action_mask: Optional[torch.BoolTensor]
     info: Optional[dict]
@@ -549,6 +551,9 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
 class PRMExperienceMaker(NaiveExperienceMaker):
     @torch.no_grad()
     def make_experience(self, prompts: Union[str, List[str]], **generate_kwargs) -> Experience:
+        sep_token = '\n'
+        km_token = 'ки'
+
         self.actor.eval()
         self.critic.eval()
         self.initial_model.eval()
@@ -562,6 +567,128 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         self.strategy.print('='*30+'actor start to generate sequences'+30*'=')
         # sequences = prompt+answer
         sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
+        actor_p_responses = self.tokenizer.batch_decode(sequences, skip_special_tokens=False)
+        split_actor_p_responses = [resp.split(sep_token) for resp in actor_p_responses]
+        # 给每个response加上sep_token，过滤掉空字符串
+        # 去掉原来里面存在的km token
+        split_actor_p_responses = [[resp.replace(km_token, '')+sep_token for resp in split_resp if resp.strip()] for split_resp in split_actor_p_responses]
+        for split_resp in split_actor_p_responses:
+            # 去掉最后一个换行符\n
+            split_resp[-1] = split_resp[-1][:-1]
+
+        # 检查下有没有填充
+        split_actor_seqs = [[self.tokenize_fn(resp, self.prompt_max_len, device='cuda') for resp in split_resp] for split_resp in split_actor_p_responses]
+        # 元素为torch.tensor, (1, len)
+        split_actor_seqs = [[item['input_ids'][0] for item in split_seq] for split_seq in split_actor_seqs ]
+        # 用于确定每个step的reward位置
+        split_actor_lens = [[len(seq) for seq in split_seq] for split_seq in split_actor_seqs]
+
+        concatenated_actor_seqs = []
+        for split_actor_seq in split_actor_seqs:
+            # 展平二维列表
+            flat_list = [item for sublist in split_actor_seq for item in sublist]
+            concatenated_actor_seqs.append(flat_list)
+        # 找到最长的seq
+        max_len = max([len(seq) for seq in concatenated_actor_seqs])
+        # 在短于max_len的seq后补充pad到max_len
+        concatenated_actor_seqs = [seq+[self.tokenizer.pad_token_id]*(max_len-len(seq)) for seq in concatenated_actor_seqs]
+        # 重新转换成tensor
+        sequences = torch.tensor(concatenated_actor_seqs, device='cuda')
+
+        # fix bug, 至少有一个，不然backward会没有更新报错
+        km_join_p_responses = [km_token.join(split_resp)+km_token for split_resp in split_actor_p_responses]
+
+        step_rewards = self.get_step_rewards(km_join_p_responses)
+        # 如果len(reward)!=0，否则avg=0
+        avg_step_rewards = []
+        for reward in step_rewards:
+            if len(reward):
+                avg_step_rewards.append(sum(reward)/len(reward))
+            else:
+                avg_step_rewards.append(0)
+        rewards = torch.zeros_like(sequences, device='cuda', dtype=torch.bfloat16)
+
+        actor_eos_token_id = generate_kwargs['eos_token_id']
+        actor_pad_token_id = generate_kwargs['pad_token_id']
+        sequences, attention_mask, action_mask = self.actor.process_sequences(sequences, input_len, actor_eos_token_id, actor_pad_token_id)
+
+        num_actions = action_mask.size(1)
+        action_log_probs = self.actor(sequences, num_actions, attention_mask)
+        base_action_log_probs = self.initial_model(sequences, num_actions, attention_mask)
+
+
+        step_values = self.get_values(km_join_p_responses)        
+        values = torch.zeros_like(sequences, device=sequences.device, dtype=torch.bfloat16)
+
+        for i in range(len(step_rewards)):
+            step_reward = step_rewards[i]
+            step_value = step_values[i]
+            split_actor_len = split_actor_lens[i]
+            start = 0
+            for j in range(len(step_reward)):
+                try:
+                    part_len = split_actor_len[j]
+                    idx = start+part_len-1
+                    rewards[i, idx] = step_reward[j]
+                    values[i, idx] = step_value[j]
+                except:
+                    # print(split_actor_len)
+                    # print(split_actor_p_responses)
+                    # print(step_value)
+                    # print(step_reward)
+                    with open('len_not_match.txt', 'w') as f:
+                        f.write(str(split_actor_len))
+                        f.write(str(split_actor_p_responses))
+                        f.write(str(step_value))
+                        f.write(str(step_reward))
+                        f.write(str(km_join_p_responses))
+                    breakpoint()
+                start += part_len
+        
+        if rewards.size(1) > num_actions:
+            rewards = rewards[...,-num_actions:]
+            values = values[...,-num_actions:]
+
+        reward, kl = compute_reward(
+            rewards,
+            self.kl_ctl.value,
+            action_log_probs,
+            base_action_log_probs,
+            action_mask=action_mask,
+        )
+        advantage, returns = self.get_advantages_and_returns(
+            values,
+            reward,
+            action_mask,
+            generate_kwargs["gamma"],
+            generate_kwargs["lambd"],
+        )
+
+
+        info = {
+            "kl": masked_mean(kl, action_mask, dim=-1),
+            "reward": torch.tensor(avg_step_rewards, device=reward.device, dtype=torch.bfloat16),
+            "return": reward.sum(dim=-1),
+            "response_length": action_mask.float().sum(dim=-1),
+            "total_length": attention_mask.float().sum(dim=-1),
+        }
+        # reset model state
+        self.actor.train()
+        self.critic.train()
+        return Experience(
+            sequences,
+            action_log_probs,
+            values,
+            returns,
+            advantage,
+            # km_join_p_responses,
+            # split_actor_lens,
+            attention_mask,
+            action_mask,
+            info,
+        )
+
+
 
         # sequences = sequences[...,:-5]
         # attention_mask = attention_mask[...,:-5]
@@ -683,6 +810,46 @@ class PRMExperienceMaker(NaiveExperienceMaker):
             if char in allowed_chars:
                 return i
         return len(s)
+    
+    def get_step_rewards(self, km_join_p_responses: list[str])->list[list[float]]:
+        km_token_id1 = 12902
+        km_token_id2 = 1107
+
+        good_token_id = 648
+        bad_token_id = 387
+        candidate_tokens = [good_token_id, bad_token_id]
+
+        reward_encoded_inputs = self.tokenize_fn(km_join_p_responses, self.prompt_max_len*10, device='cuda', tokenizer=self.critic_tokenizer)
+        reward_encoded_sequences = reward_encoded_inputs['input_ids']
+        reward_encoded_attention_mask = reward_encoded_inputs['attention_mask']
+        reward_logits = self.reward_model(reward_encoded_sequences, attention_mask=reward_encoded_attention_mask)
+        reward_logits = reward_logits[..., candidate_tokens]
+        reward_scores = reward_logits.softmax(dim=-1)[:,:,0]
+        # TODO: 需要挑选个好的
+        reward_scores = reward_scores*2-1
+        step_rewards = [score[(reward_encoded_sequences[i]==km_token_id1) | (reward_encoded_sequences[i]==km_token_id2)] for i, score in enumerate(reward_scores)]
+
+        return step_rewards
+
+    def get_values(self, km_join_p_responses: list[str])->list[list[float]]:
+        km_token_id1 = 12902
+        km_token_id2 = 1107
+
+        good_token_id = 648
+        bad_token_id = 387
+        candidate_tokens = [good_token_id, bad_token_id]
+
+        reward_encoded_inputs = self.tokenize_fn(km_join_p_responses, self.prompt_max_len*10, device='cuda', tokenizer=self.critic_tokenizer)
+        reward_encoded_sequences = reward_encoded_inputs['input_ids']
+        reward_encoded_attention_mask = reward_encoded_inputs['attention_mask']
+        reward_logits = self.critic(reward_encoded_sequences, attention_mask=reward_encoded_attention_mask, num_actions=-1)
+        reward_logits = reward_logits[..., candidate_tokens]
+        reward_scores = reward_logits.softmax(dim=-1)[:,:,0]
+        # TODO: 需要挑选个好的
+        # reward_scores = reward_scores*2-1
+        step_rewards = [score[(reward_encoded_sequences[i]==km_token_id1) | (reward_encoded_sequences[i]==km_token_id2)] for i, score in enumerate(reward_scores)]
+
+        return step_rewards
 
     def compute_value_from_sequences(self, sequences: torch.Tensor, attention_mask: torch.Tensor, input_len: int, num_actions: int, return_output:bool=False):
         step_separater = '\n'

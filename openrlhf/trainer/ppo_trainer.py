@@ -415,7 +415,10 @@ class PPOTrainer(ABC):
             # elif k in ['token_reward', 'token_value']:
             #     status[k] = v
             else:
-                status[k] = v.mean().item()
+                try:
+                    status[k] = v.mean().item()
+                except:
+                    breakpoint()
         return status
 
     def training_step_critic(self, experience: Experience) -> Dict[str, float]:
@@ -441,13 +444,61 @@ class PPOTrainer(ABC):
 
         # critic loss
         if self.train_with_prm:
-            values, output = self.experience_maker.compute_value_from_sequences(
-                sequences, 
-                attention_mask, 
-                input_len=-1, 
-                num_actions=num_actions,
-                return_output=True
-            )
+            # values, output = self.experience_maker.compute_value_from_sequences(
+            #     sequences, 
+            #     attention_mask, 
+            #     input_len=-1, 
+            #     num_actions=num_actions,
+            #     return_output=True
+            # )
+            sep_token = '\n'
+            km_token = 'ки'
+            actor_p_responses = self.experience_maker.tokenizer.batch_decode(sequences, skip_special_tokens=False)
+            split_actor_p_responses = [resp.split(sep_token) for resp in actor_p_responses]
+            # 给每个response加上sep_token，过滤掉空字符串
+            split_actor_p_responses = [[resp.replace(km_token, '')+sep_token for resp in split_resp if resp.strip()] for split_resp in split_actor_p_responses]
+            for split_resp in split_actor_p_responses:
+                # 去掉最后一个换行符\n
+                split_resp[-1] = split_resp[-1][:-1]
+            # 检查下有没有填充
+            split_actor_seqs = [[self.experience_maker.tokenize_fn(resp, self.prompt_max_len, device='cuda') for resp in split_resp] for split_resp in split_actor_p_responses]
+            # 元素为torch.tensor, (1, len)
+            split_actor_seqs = [[item['input_ids'][0] for item in split_seq] for split_seq in split_actor_seqs ]
+            # 用于确定每个step的reward位置
+            split_actor_lens = [[len(seq) for seq in split_seq] for split_seq in split_actor_seqs]
+
+            # fix bug, 至少有一个，不然backward会没有更新报错
+            # km_join_p_responses = [km_token.join(split_resp) for split_resp in split_actor_p_responses]
+            km_join_p_responses = [km_token.join(split_resp)+km_token for split_resp in split_actor_p_responses]
+            step_values = self.experience_maker.get_values(km_join_p_responses)        
+
+            concatenated_actor_seqs = []
+            for split_actor_seq in split_actor_seqs:
+                # 展平二维列表
+                flat_list = [item for sublist in split_actor_seq for item in sublist]
+                concatenated_actor_seqs.append(flat_list)
+            # 找到最长的seq
+            max_len = max([len(seq) for seq in concatenated_actor_seqs])
+            # 在短于max_len的seq后补充pad到max_len
+            concatenated_actor_seqs = [seq+[self.tokenizer.pad_token_id]*(max_len-len(seq)) for seq in concatenated_actor_seqs]
+            # 重新转换成tensor
+            sequences = torch.tensor(concatenated_actor_seqs, device='cuda')
+        
+            values = torch.zeros_like(sequences, device=sequences.device, dtype=torch.bfloat16)
+            for i in range(len(step_values)):
+                start = 0
+                step_value = step_values[i]
+                split_actor_len = split_actor_lens[i]
+                for j in range(len(step_value)):
+                    part_len = split_actor_len[j]
+                    idx = start + part_len-1
+                    try:
+                        values[i, idx] = step_value[j]
+                    except:
+                        breakpoint()
+                    start += part_len
+            if values.size(1) > num_actions:
+                values = values[:, -num_actions:]
         else:
             values, output = self.critic(
                 sequences,
@@ -469,7 +520,10 @@ class PPOTrainer(ABC):
         else:
             aux_loss = 0
         loss = critic_loss + aux_loss * self.args.aux_loss_coef
-        self.strategy.backward(loss, self.critic, self.critic_optim)
+        try:
+            self.strategy.backward(loss, self.critic, self.critic_optim)
+        except:
+            breakpoint()
         self.strategy.optimizer_step(self.critic_optim, self.critic, self.critic_scheduler, name="critic")
 
         # status
