@@ -601,8 +601,10 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         km_join_p_responses = [km_token.join(split_resp)+km_token for split_resp in split_actor_p_responses]
 
         step_rewards = self.get_step_rewards(km_join_p_responses)
-        self.strategy.print("km_join_p_responses:\n", km_join_p_responses)
-        self.strategy.print("step_rewards:\n", step_rewards)
+
+        print("km_join_p_responses:\n", km_join_p_responses) # 这是一个有km的字符串[]
+        print("step_rewards:\n", step_rewards)
+
         # 如果len(reward)!=0，否则avg=0
         avg_step_rewards = []
         for reward in step_rewards:
@@ -662,8 +664,8 @@ class PRMExperienceMaker(NaiveExperienceMaker):
             base_action_log_probs,
             action_mask=action_mask,
         )
-        self.strategy.print("reward:\n", reward)
-        self.strategy.print("kl:\n", kl)
+        print("reward:", reward)
+        print("kl:", kl)
         advantage, returns = self.get_advantages_and_returns(
             values,
             reward,
@@ -671,8 +673,8 @@ class PRMExperienceMaker(NaiveExperienceMaker):
             generate_kwargs["gamma"],
             generate_kwargs["lambd"],
         )
-        self.strategy.print("advantage:\n", advantage)
-        self.strategy.print("returns:\n", returns)
+        print("advantage:", advantage)
+        print("returns:", returns)
 
 
         info = {
