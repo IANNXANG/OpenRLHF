@@ -614,6 +614,7 @@ class PRMExperienceMaker(NaiveExperienceMaker):
 
         actor_eos_token_id = generate_kwargs['eos_token_id']
         actor_pad_token_id = generate_kwargs['pad_token_id']
+        #重新计算sequences，attention_mask, action_mask
         sequences, attention_mask, action_mask = self.actor.process_sequences(sequences, input_len, actor_eos_token_id, actor_pad_token_id)
 
         num_actions = action_mask.size(1)
@@ -661,6 +662,8 @@ class PRMExperienceMaker(NaiveExperienceMaker):
             base_action_log_probs,
             action_mask=action_mask,
         )
+        print("reward:\n", reward)
+        print("kl:\n", kl)
         advantage, returns = self.get_advantages_and_returns(
             values,
             reward,
@@ -668,6 +671,8 @@ class PRMExperienceMaker(NaiveExperienceMaker):
             generate_kwargs["gamma"],
             generate_kwargs["lambd"],
         )
+        print("advantage:\n", advantage)
+        print("returns:\n", returns)
 
 
         info = {
