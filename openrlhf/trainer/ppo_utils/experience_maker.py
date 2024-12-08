@@ -675,8 +675,6 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         )
         print("advantage:", advantage)
         print("returns:", returns)
-        print("km_join_p_responses:", km_join_p_responses[0].shape) # 这是一个有km的字符串[]
-        print("step_rewards:", step_rewards[0].shape)
         print("reward:", reward.shape)
         print("kl:", kl.shape)
         print("advantage:", advantage.shape)
