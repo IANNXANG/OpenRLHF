@@ -567,9 +567,6 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         self.strategy.print('='*30+'actor start to generate sequences'+30*'=')
         # sequences = prompt+answer
         sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
-        print("sequence:\n", sequences)
-        print("attention_mask:\n", attention_mask)
-        print("action_mask:\n", action_mask)
         actor_p_responses = self.tokenizer.batch_decode(sequences, skip_special_tokens=False)
         split_actor_p_responses = [resp.split(sep_token) for resp in actor_p_responses]
         # 给每个response加上sep_token，过滤掉空字符串
