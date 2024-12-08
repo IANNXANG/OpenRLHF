@@ -567,7 +567,8 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         self.strategy.print('='*30+'actor start to generate sequences'+30*'=')
         # sequences = prompt+answer
         sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
-
+        #sequence是一个二维tensor，(batch_size, seq_len)
+        # 把sequences拆成prompt和answer
         actor_p_responses = self.tokenizer.batch_decode(sequences, skip_special_tokens=False)
         split_actor_p_responses = [resp.split(sep_token) for resp in actor_p_responses]
         # 给每个response加上sep_token，过滤掉空字符串
@@ -600,6 +601,8 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         km_join_p_responses = [km_token.join(split_resp)+km_token for split_resp in split_actor_p_responses]
 
         step_rewards = self.get_step_rewards(km_join_p_responses)
+        print("km_join_p_responses:\n", km_join_p_responses)
+        print("step_rewards:\n", step_rewards)
         # 如果len(reward)!=0，否则avg=0
         avg_step_rewards = []
         for reward in step_rewards:
