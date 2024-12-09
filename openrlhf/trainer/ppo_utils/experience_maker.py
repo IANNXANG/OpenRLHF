@@ -569,6 +569,18 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         self.strategy.print('='*30+'actor start to generate sequences'+30*'=')
         # sequences = prompt+answer
         sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
+        answer1 = self.tokenizer.batch_decode(sequences, skip_special_tokens=False)
+        answer1_replace = [ans.replace("<|im_end|>", "\n\nWait, did I make a mistake somewhere? Let me check again?") for ans in answer1]
+        prompts = answer1_replace
+        # generate seq
+        inputs = self.tokenize_fn(prompts, self.prompt_max_len, device="cuda")
+        print("prompts:", type(prompts),'\n',prompts)  #list
+        print("inputs:", type(inputs),'\n',inputs)  #dict
+        print('='*30+'添加反思生成第二次结果'+30*'=')
+        sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
+
+
+
         #sequence是一个二维tensor，(batch_size, seq_len)
         # 把sequences拆成prompt和answer
         actor_p_responses = self.tokenizer.batch_decode(sequences, skip_special_tokens=False)
