@@ -562,8 +562,8 @@ class PRMExperienceMaker(NaiveExperienceMaker):
 
         # generate seq
         inputs = self.tokenize_fn(prompts, self.prompt_max_len, device="cuda")
-        print("prompt:", type(prompts),'\n',prompts)
-        print("inputs:", type(inputs),'\n',inputs)
+        print("prompts:", type(prompts),'\n',prompts)  #list
+        print("inputs:", type(inputs),'\n',inputs)  #dict
         input_len = inputs['input_ids'].size(1)
         self.strategy.print('actor use gpu:'+str(next(self.actor.parameters()).is_cuda))
         self.strategy.print('='*30+'actor start to generate sequences'+30*'=')
@@ -675,12 +675,14 @@ class PRMExperienceMaker(NaiveExperienceMaker):
             generate_kwargs["gamma"],
             generate_kwargs["lambd"],
         )
-        print("advantage:", advantage)
-        print("returns:", returns)
-        print("reward:", reward.shape)
-        print("kl:", kl.shape)
-        print("advantage:", advantage.shape)
-        print("returns:", returns.shape)
+        print("advantage:", type(advantage),'\n',advantage)
+        print("returns:", type(returns),'\n',returns)
+        print("reward:", type(reward),'\n',reward.shape)
+        print("kl:", type(kl),'\n',kl.shape)
+        print("advantage:", type(advantage),'\n',advantage.shape)
+        print("returns:", type(returns),'\n',returns.shape)
+        print("prompts:", type(prompts),'\n',prompts)  #list
+        print("inputs:", type(inputs),'\n',inputs)  #dict
 
 
         info = {
