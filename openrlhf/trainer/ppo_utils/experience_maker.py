@@ -149,6 +149,8 @@ class NaiveExperienceMaker(ABC):
 
         # generate seq
         inputs = self.tokenize_fn(prompts, self.prompt_max_len, device="cuda")
+        print("prompt:", type(prompts),'\n',prompts)
+        print("inputs:", type(inputs),'\n',inputs)
         
         self.strategy.print('actor use gpu:'+str(next(self.actor.parameters()).is_cuda))
         self.strategy.print('='*30+'actor start to generate sequences'+30*'=')
