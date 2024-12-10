@@ -562,8 +562,8 @@ class PRMExperienceMaker(NaiveExperienceMaker):
 
         # generate seq
         inputs = self.tokenize_fn(prompts, self.prompt_max_len, device="cuda")
-        print("prompts:", type(prompts),'\n',prompts)  #list
-        print("inputs:", type(inputs),'\n',inputs)  #dict
+        print("prompts:", type(prompts),'\n',"prompts")  #list
+        print("inputs:", type(inputs),'\n',"inputs")  #dict
         input_len = inputs['input_ids'].size(1)
         self.strategy.print('actor use gpu:'+str(next(self.actor.parameters()).is_cuda))
         self.strategy.print('='*30+'actor start to generate sequences'+30*'=')
