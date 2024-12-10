@@ -569,8 +569,8 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         self.strategy.print('='*30+'actor start to generate sequences'+30*'=')
         # sequences = prompt+answer
         sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
-        answer1 = self.tokenizer.batch_decode(sequences, skip_special_tokens=False)
-        answer1_replace = [ans.replace("<|im_end|>", "\n\nWait, did I make a mistake somewhere? Let me check again?") for ans in answer1]
+        answer1 = self.tokenizer.batch_decode(sequences, skip_special_tokens=True)
+        answer1_replace = [ans.replace("<|im_end|>", "")+"\n\nWait, did I make a mistake somewhere? Let me check again?" for ans in answer1]
         prompts = answer1_replace
         # generate seq
         inputs = self.tokenize_fn(prompts, self.prompt_max_len, device="cuda")
@@ -583,7 +583,7 @@ class PRMExperienceMaker(NaiveExperienceMaker):
 
         #sequence是一个二维tensor，(batch_size, seq_len)
         # 把sequences拆成prompt和answer
-        actor_p_responses = self.tokenizer.batch_decode(sequences, skip_special_tokens=False)
+        actor_p_responses = self.tokenizer.batch_decode(sequences, skip_special_tokens=True)
         split_actor_p_responses = [resp.split(sep_token) for resp in actor_p_responses]
         # 给每个response加上sep_token，过滤掉空字符串
         # 去掉原来里面存在的km token
