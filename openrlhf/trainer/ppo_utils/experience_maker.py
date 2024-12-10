@@ -574,8 +574,8 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         prompts = answer1_replace
         # generate seq
         inputs = self.tokenize_fn(prompts, self.prompt_max_len, device="cuda")
-        print("prompts:", type(prompts),'\n',prompts)  #list
-        print("inputs:", type(inputs),'\n',inputs)  #dict
+        print("prompts:", type(prompts),'\n')  #list
+        print("inputs:", type(inputs),'\n')  #dict
         print('='*30+'添加反思生成第二次结果'+30*'=')
         sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
 
@@ -616,7 +616,7 @@ class PRMExperienceMaker(NaiveExperienceMaker):
 
         step_rewards = self.get_step_rewards(km_join_p_responses)
 
-        print("km_join_p_responses:\n", km_join_p_responses) # 这是一个有km的字符串[]
+        print("反思后内容:\n", km_join_p_responses) # 这是一个有km的字符串[]
         print("step_rewards:\n", step_rewards)
 
         # 如果len(reward)!=0，否则avg=0
