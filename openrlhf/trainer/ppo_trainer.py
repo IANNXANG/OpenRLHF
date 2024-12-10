@@ -508,6 +508,8 @@ class PPOTrainer(ABC):
                 packed_seq_lens=packed_seq_lens,
             )
         # loss function
+        print("values: ", values.shape, "\n", values)
+        print("old_values: ", old_values.shape, "\n", old_values)
         critic_loss = self.critic_loss_fn(
             values,
             old_values,
