@@ -550,7 +550,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
 
 class PRMExperienceMaker(NaiveExperienceMaker):
     @torch.no_grad()
-    def make_experience(self, prompts: Union[str, List[str]], **generate_kwargs) -> Experience:
+    def make_experience(self, prompts_old: Union[str, List[str]], **generate_kwargs) -> Experience:
         sep_token = '\n'
         km_token = 'ки'
 
@@ -559,19 +559,18 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         self.initial_model.eval()
         if self.reward_model is not None:
             self.reward_model.eval()
-
         # generate seq
-        inputs = self.tokenize_fn(prompts, self.prompt_max_len, device="cuda")
-        print("prompts:", type(prompts),'\n',"prompts")  #list
-        print("inputs:", type(inputs),'\n',"inputs")  #dict
-        input_len = inputs['input_ids'].size(1)
+        inputs_old = self.tokenize_fn(prompts_old, self.prompt_max_len, device="cuda")
+        print("prompts:", type(prompts_old),'\n',"prompts")  #list
+        print("inputs:", type(inputs_old),'\n',"inputs")  #dict
+        input_len = inputs_old['input_ids'].size(1)
         self.strategy.print('actor use gpu:'+str(next(self.actor.parameters()).is_cuda))
         self.strategy.print('='*30+'actor start to generate sequences'+30*'=')
         # sequences = prompt+answer
-        sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
-        answer1 = self.tokenizer.batch_decode(sequences, skip_special_tokens=True)
-        answer1_replace = [ans.replace("<|im_end|>", "")+"\n\nWait, did I make a mistake somewhere? Let me check again?" for ans in answer1]
-        prompts = answer1_replace
+        sequences_old, attention_mask_old, action_mask_old = self.actor.generate(**inputs_old, **generate_kwargs)
+        answer_old = self.tokenizer.batch_decode(sequences_old, skip_special_tokens=True)
+        answer_old_replace = [ans.replace("<|im_end|>", "")+"\n\nWait, did I make a mistake somewhere? Let me check again?" for ans in answer_old]
+        prompts = answer_old_replace
         # generate seq
         inputs = self.tokenize_fn(prompts, self.prompt_max_len, device="cuda")
         print("prompts:", type(prompts),'\n')  #list
@@ -693,8 +692,12 @@ class PRMExperienceMaker(NaiveExperienceMaker):
         print("kl:", type(kl),'\n',kl.shape)
         print("advantage:", type(advantage),'\n',advantage.shape)
         print("returns:", type(returns),'\n',returns.shape)
-        print("prompts:", type(prompts),'\n',prompts)  #list
-        print("inputs:", type(inputs),'\n',inputs)  #dict
+        print("prompts:", type(prompts),'\n',"prompts")  #list
+        print("inputs:", type(inputs),'\n',"inputs")  #dict
+        print("sequences_old", type(sequences_old), '\n', sequences_old.shape)  # tensor
+        print("attention_mask_old:", type(attention_mask_old), '\n', attention_mask_old.shape)  # tensor
+        print("sequences:", type(sequences),'\n',sequences.shape)  #tensor
+        print("attention_mask:", type(attention_mask),'\n',attention_mask.shape)  #tensor
 
 
         info = {

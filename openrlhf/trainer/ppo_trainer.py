@@ -484,7 +484,7 @@ class PPOTrainer(ABC):
             # 重新转换成tensor
             sequences = torch.tensor(concatenated_actor_seqs, device='cuda')
         
-            values = torch.zeros_like(sequences, device=sequences.device, dtype=torch.bfloat16)
+            values = torch.zeros_like(sequences, device=sequences.device, dtype=torch.bfloat16) #与sequences长度相当
             for i in range(len(step_values)):
                 start = 0
                 step_value = step_values[i]
