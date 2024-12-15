@@ -686,8 +686,9 @@ class PRMExperienceMaker(NaiveExperienceMaker):
             generate_kwargs["gamma"],
             generate_kwargs["lambd"],
         )
-        print("attention_mask_old:", type(attention_mask_old), '\n', attention_mask_old.shape, '\n', attention_mask_old)  # tensor
-        print("attention_mask:", type(attention_mask),'\n',attention_mask.shape,'\n',attention_mask.shape)  #tensor
+        print("step_rewards:",type(step_rewards), '\n', step_rewards)
+        print("attention_mask_old:", type(attention_mask_old), '\n', attention_mask_old.shape)  # tensor
+        print("attention_mask:", type(attention_mask),'\n',attention_mask.shape)  #tensor
         print("advantage:", type(advantage),'\n',advantage)
         print("returns:", type(returns),'\n',returns)
         print("reward:", type(reward),'\n',reward.shape)
